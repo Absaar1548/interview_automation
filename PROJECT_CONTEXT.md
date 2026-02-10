@@ -1,45 +1,36 @@
-# Interview Automation System – Project Context
+# AI Interview Agent – Project Context
 
-This is an AI-driven L1 Interview Automation System.
+This system is a low-cost, high-accuracy AI-powered L1 interview agent
+integrated with Zwayam.
 
-## High-level goals
-- Fully automated technical screening interviews
-- Conversational AI interviewer
-- Resume-aware question selection
-- Real-time proctoring (audio + video)
-- Explainable scoring & reports
+## Core goals
+- End-to-end interview automation
+- ≥90% selection relevance
+- Strong fraud detection with low false positives
+- Structured, explainable feedback for RR Owners and Delivery Heads
 
-## Tech Stack
-Frontend:
-- Next.js (App Router)
-- TypeScript
-- Tailwind CSS
-- WebSockets for live interview
+## Architecture
+- Modular monolithic backend (FastAPI)
+- Next.js frontend
+- REST APIs + WebSockets
+- Event-driven internal workflows
+- API-first, cost-optimized design
 
-Backend:
-- Python
-- FastAPI
-- REST + WebSockets
-- Monolithic deployment with modular services
-
-## Architectural principles
-- Frontend-first UX-driven development
-- Contract-first APIs
-- Clear separation of concerns
-- No premature microservices
-- Readable, production-grade code (not demo code)
-
-## Key backend components
-- Interview Orchestrator (state machine)
-- Question Engine
-- Proctoring Service
-- Evaluation & Scoring
-- Reporting
+## Key capabilities
+- Video + written interviews
+- Adaptive questioning (30/40/30 difficulty)
+- Resume & JD-aware personalization
+- Silent fraud detection (face, voice, behavior)
+- Human-in-the-loop validation
+- Zwayam bi-directional integration
 
 ## Constraints
-- Low scale initially
+- No heavy model training in Phase 1
+- Prefer API-based AI models
 - English only
-- Single LLM (multiple prompts)
-- Azure infrastructure (later)
+- Azure-first deployment
 
-All code should follow these principles strictly.
+All generated code must:
+- Be production-grade
+- Follow the defined folder responsibilities
+- Avoid over-engineering
