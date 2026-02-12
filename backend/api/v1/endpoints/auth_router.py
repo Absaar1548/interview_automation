@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
+from bson import ObjectId
 from backend.core.config import settings
 from backend.core.security import verify_password, get_password_hash, create_access_token
 from backend.database.schema import Candidate, HR, DeliveryHead
@@ -14,7 +15,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login/candidate")
 
 # Pydantic Models for Registration Requests
 class CandidateRegisterRequest(BaseModel):
-    username: EmailStr
+    username: str
     password: str
 
 class HRRegisterRequest(BaseModel):
@@ -49,6 +50,13 @@ class CandidateResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_objectid_to_str(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
+
     class Config:
         from_attributes = True
 
@@ -59,6 +67,13 @@ class HRResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_objectid_to_str(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
+
     class Config:
         from_attributes = True
 
@@ -68,6 +83,13 @@ class DeliveryHeadResponse(BaseModel):
     email: str
     is_active: bool
     created_at: datetime
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_objectid_to_str(cls, v):
+        if isinstance(v, ObjectId):
+            return str(v)
+        return v
 
     class Config:
         from_attributes = True

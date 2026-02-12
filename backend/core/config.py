@@ -1,7 +1,13 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Get the directory where this config file is located (backend/core)
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load .env file from the backend directory
+env_path = BASE_DIR / ".env"
+load_dotenv(dotenv_path=env_path)
 
 class Settings:
     """

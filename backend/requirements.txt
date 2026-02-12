@@ -8,4 +8,5 @@ python-multipart
 motor
 beanie
 pymongo
+pip install argon2-cffi
 # Add other dependencies as needed
