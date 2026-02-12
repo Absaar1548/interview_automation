@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from backend.api.v1.endpoints import (
+from api.v1.endpoints import (
     session_router,
     question_router,
     submit_evaluation_router,
