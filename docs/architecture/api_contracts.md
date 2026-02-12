@@ -97,7 +97,8 @@ GET /questions/next
 ```json
 {
   "question_id": "uuid",
-  "type": "VIDEO | TEXT | CODING",
+  "category": "CONVERSATIONAL | STATIC | CODING",
+  "answer_mode": "TEXT | AUDIO | CODE",
   "difficulty": "EASY | MEDIUM | HARD",
   "prompt": "string",
   "time_limit_sec": 300
@@ -119,7 +120,7 @@ POST /evaluation/submit
 ```json
 {
   "question_id": "uuid",
-  "answer_type": "VIDEO | TEXT | CODE",
+  "answer_type": "TEXT | AUDIO | CODE",
   "answer_payload": "string"
 }
 ```
