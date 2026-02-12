@@ -4,35 +4,31 @@ def get_questions():
     """
     return [
         {
-            "question_id": "q1",
+            "id": "q1",
+            "type": "AUDIO",
             "category": "CONVERSATIONAL",
-            "answer_mode": "AUDIO",
-            "difficulty": "EASY",
-            "prompt": "Tell me about yourself and your experience with Python.",
-            "time_limit_sec": 30
+            "text": "Tell me about yourself and your experience with Python.",
+            "duration_seconds": 30
         },
         {
-            "question_id": "q2",
+            "id": "q2",
+            "type": "AUDIO",
             "category": "STATIC",
-            "answer_mode": "AUDIO",
-            "difficulty": "MEDIUM",
-            "prompt": "What is the difference between specific and generic exceptions in Python?",
-            "time_limit_sec": 45
+            "text": "What is the difference between specific and generic exceptions in Python?",
+            "duration_seconds": 45
         },
         {
-            "question_id": "q3",
+            "id": "q3",
+            "type": "CODE",
             "category": "CODING",
-            "answer_mode": "CODE",
-            "difficulty": "MEDIUM",
-            "prompt": "Write a function to reverse a string in Python without using slicing.",
-            "time_limit_sec": 300
+            "text": "Write a function to reverse a string in Python without using slicing.",
+            "duration_seconds": 300
         },
         {
-            "question_id": "q4",
+            "id": "q4",
+            "type": "CODE",
             "category": "CODING",
-            "answer_mode": "CODE",
-            "difficulty": "HARD",
-            "prompt": "Implement a binary search algorithm in Python.",
-            "time_limit_sec": 300
+            "text": "Implement a binary search algorithm in Python.",
+            "duration_seconds": 300
         }
     ]
