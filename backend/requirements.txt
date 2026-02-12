@@ -1,5 +1,11 @@
 fastapi
-uvicorn
-pydantic
+uvicorn[standard]
+pydantic[email]
 python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+motor
+beanie
+pymongo
 # Add other dependencies as needed

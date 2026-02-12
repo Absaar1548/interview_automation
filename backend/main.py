@@ -8,12 +8,14 @@ from backend.api.v1.endpoints import (
     proctoring_router,
     summary_router,
     custom_question_router,
-    zwayam_router
+    zwayam_router,
+    auth_router
 )
 
 app = FastAPI(title="AI Interview Automation Backend")
 
 # Router inclusions
+app.include_router(auth_router.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(session_router.router, prefix="/api/v1/session", tags=["Session"])
 app.include_router(question_router.router, prefix="/api/v1/question", tags=["Question"])
 app.include_router(submit_evaluation_router.router, prefix="/api/v1/submit", tags=["Submit"])
