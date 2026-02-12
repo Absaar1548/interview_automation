@@ -12,15 +12,33 @@ export default function InterviewPage() {
     const isConnected = useInterviewStore((s) => s.isConnected);
     const error = useInterviewStore((s) => s.error);
     const startInterview = useInterviewStore((s) => s.startInterview);
+    const initialize = useInterviewStore((s) => s.initialize);
     const hasStarted = useRef(false);
+    const hasBootstrapped = useRef(false);
 
     useEffect(() => {
-        if (!interviewId || !candidateToken || !isConnected) return;
+        if (!interviewId || !candidateToken) {
+            // START DEV BOOTSTRAP - Remove in Production
+            if (process.env.NODE_ENV === "development" && !hasBootstrapped.current) {
+                hasBootstrapped.current = true;
+                // Add /api/v1 because NEXT_PUBLIC_API_BASE_URL is localhost:8000
+                fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/dev/bootstrap`)
+                    .then((res) => res.json())
+                    .then((data) => {
+                        initialize(data.interview_id, data.candidate_token);
+                    })
+                    .catch((err) => console.error("Bootstrap failed", err));
+            }
+            // END DEV BOOTSTRAP
+            return;
+        }
+
+        if (!isConnected) return;
         if (hasStarted.current) return;
 
         hasStarted.current = true;
         startInterview();
-    }, [interviewId, candidateToken, isConnected, startInterview]);
+    }, [interviewId, candidateToken, isConnected, startInterview, initialize]);
 
     if (!interviewId || !candidateToken) {
         return (

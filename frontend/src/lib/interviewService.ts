@@ -49,7 +49,7 @@ class InterviewService {
 
     async startInterview(): Promise<InterviewState> {
         const response = await apiClient.post<{ state: InterviewState }, {}>(
-            "/session/start",
+            "/api/v1/session/start",
             {},
             true
         );
@@ -67,12 +67,12 @@ class InterviewService {
     }
 
     async fetchNextQuestion(): Promise<QuestionResponse> {
-        return apiClient.get<QuestionResponse>("/questions/next", true);
+        return apiClient.get<QuestionResponse>("/api/v1/question/next", true);
     }
 
     async submitAnswer(payload: EvaluationSubmitRequest): Promise<InterviewState> {
         const response = await apiClient.post<EvaluationSubmitResponse, EvaluationSubmitRequest>(
-            "/evaluation/submit",
+            "/api/v1/submit/submit",
             payload,
             true
         );
@@ -86,7 +86,7 @@ class InterviewService {
 
     async sendProctoringEvent(event: ProctoringEventRequest): Promise<void> {
         await apiClient.post<ProctoringEventResponse, ProctoringEventRequest>(
-            "/proctoring/event",
+            "/api/v1/proctoring/event",
             event,
             true
         );
