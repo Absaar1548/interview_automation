@@ -15,6 +15,9 @@ async def answer_websocket(websocket: WebSocket):
             # Receive message (can be text or binary)
             message = await websocket.receive()
             
+            if message["type"] == "websocket.disconnect":
+                break
+            
             if "text" in message:
                 try:
                     import json

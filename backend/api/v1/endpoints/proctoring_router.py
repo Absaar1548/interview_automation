@@ -151,6 +151,8 @@ async def proctoring_media_websocket(websocket: WebSocket):
     try:
         while True:
             # Receive and ignore all messages (binary/text)
-            await websocket.receive()
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
     except WebSocketDisconnect:
         pass
