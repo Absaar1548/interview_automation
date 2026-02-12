@@ -1,128 +1,123 @@
-import type {
-    InterviewState,
-    QuestionResponse,
-    EvaluationSubmitRequest,
-    EvaluationSubmitResponse,
-    SummaryResponse,
-    ProctoringEventRequest,
-    ProctoringEventResponse,
-    CodeTemplateResponse,
-    ConversationPromptResponse,
-    ApiError,
-} from "../types/api";
+import { ApiError } from "@/types/api";
 
-const BASE_PATH = "/api/v1";
+class ApiClient {
+    private baseURL: string;
+    private interviewId: string | null = null;
 
-async function request<T>(
-    endpoint: string,
-    options: {
-        method: "GET" | "POST";
-        interviewId?: string;
-        body?: unknown;
-    }
-): Promise<T> {
-    const headers: Record<string, string> = {};
-
-    if (options.interviewId) {
-        headers["X-Interview-Id"] = options.interviewId;
+    constructor(baseURL: string) {
+        this.baseURL = baseURL;
     }
 
-    if (options.body) {
-        headers["Content-Type"] = "application/json";
+    setInterviewId(id: string): void {
+        this.interviewId = id;
     }
 
-    const response = await fetch(`${BASE_PATH}${endpoint}`, {
-        method: options.method,
-        headers,
-        body: options.body ? JSON.stringify(options.body) : undefined,
-    });
+    clearInterviewId(): void {
+        this.interviewId = null;
+    }
 
-    if (!response.ok) {
-        try {
-            const error: ApiError = await response.json();
-            throw error;
-        } catch {
-            throw {
-                error_code: "HTTP_ERROR",
-                message: `Request failed with status ${response.status}`,
-            } as ApiError;
+    private log(message: string): void {
+        if (process.env.NODE_ENV === "development") {
+            console.debug(`[ApiClient] ${message}`);
         }
     }
 
-    try {
-        return await response.json();
-    } catch {
-        throw {
-            error_code: "INVALID_JSON",
-            message: "Server returned invalid JSON",
-        } as ApiError;
+    async get<T>(path: string, requireInterviewId: boolean = false): Promise<T> {
+        this.log(`REQUEST: GET ${path}`);
+
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+        if (requireInterviewId) {
+            if (!this.interviewId) {
+                const error: ApiError = {
+                    error_code: "MISSING_INTERVIEW_ID",
+                    message: "Interview ID is required but not set",
+                    current_state: null,
+                };
+                this.log(`ERROR: GET ${path} - MISSING_INTERVIEW_ID`);
+                throw error;
+            }
+            headers["X-Interview-Id"] = this.interviewId;
+        }
+
+        const response = await fetch(`${this.baseURL}${path}`, {
+            method: "GET",
+            headers,
+            credentials: "include",
+        });
+
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+
+        this.log(`RESPONSE: GET ${path} - ${response.status}`);
+
+        if (!response.ok) {
+            if (data && typeof data === "object" && "error_code" in data && "message" in data) {
+                this.log(`ERROR: GET ${path} - ${data.error_code}`);
+                throw data as ApiError;
+            }
+            const error: ApiError = {
+                error_code: "HTTP_ERROR",
+                message: `Request failed with status ${response.status}`,
+                current_state: null,
+            };
+            this.log(`ERROR: GET ${path} - HTTP_ERROR`);
+            throw error;
+        }
+
+        return data as T;
+    }
+
+    async post<T, B>(path: string, body: B, requireInterviewId: boolean = false): Promise<T> {
+        this.log(`REQUEST: POST ${path}`);
+
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+        if (requireInterviewId) {
+            if (!this.interviewId) {
+                const error: ApiError = {
+                    error_code: "MISSING_INTERVIEW_ID",
+                    message: "Interview ID is required but not set",
+                    current_state: null,
+                };
+                this.log(`ERROR: POST ${path} - MISSING_INTERVIEW_ID`);
+                throw error;
+            }
+            headers["X-Interview-Id"] = this.interviewId;
+        }
+
+        const response = await fetch(`${this.baseURL}${path}`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            credentials: "include",
+        });
+
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+
+        this.log(`RESPONSE: POST ${path} - ${response.status}`);
+
+        if (!response.ok) {
+            if (data && typeof data === "object" && "error_code" in data && "message" in data) {
+                this.log(`ERROR: POST ${path} - ${data.error_code}`);
+                throw data as ApiError;
+            }
+            const error: ApiError = {
+                error_code: "HTTP_ERROR",
+                message: `Request failed with status ${response.status}`,
+                current_state: null,
+            };
+            this.log(`ERROR: POST ${path} - HTTP_ERROR`);
+            throw error;
+        }
+
+        return data as T;
     }
 }
 
-export async function startSession(
-    interviewId: string
-): Promise<{ state: InterviewState; first_question_ready: boolean }> {
-    return request("/session/start", {
-        method: "POST",
-        interviewId,
-    });
-}
-
-export async function getNextQuestion(
-    interviewId: string
-): Promise<QuestionResponse> {
-    return request("/questions/next", {
-        method: "GET",
-        interviewId,
-    });
-}
-
-export async function submitEvaluation(
-    interviewId: string,
-    payload: EvaluationSubmitRequest
-): Promise<EvaluationSubmitResponse> {
-    return request("/evaluation/submit", {
-        method: "POST",
-        interviewId,
-        body: payload,
-    });
-}
-
-export async function getSummary(
-    interviewId: string
-): Promise<SummaryResponse> {
-    return request("/summary", {
-        method: "GET",
-        interviewId,
-    });
-}
-
-export async function sendProctoringEvent(
-    interviewId: string,
-    payload: ProctoringEventRequest
-): Promise<ProctoringEventResponse> {
-    return request("/proctoring/event", {
-        method: "POST",
-        interviewId,
-        body: payload,
-    });
-}
-
-export async function getCodeTemplate(
-    interviewId: string,
-    questionId: string
-): Promise<CodeTemplateResponse> {
-    return request(`/code/template/${questionId}`, {
-        method: "GET",
-        interviewId,
-    });
-}
-
-export async function getConversationPrompt(
-    interviewId: string
-): Promise<ConversationPromptResponse> {
-    return request("/conversation/prompt", {
-        method: "GET",
-        interviewId,
-    });
-}
+export const apiClient = new ApiClient(process.env.NEXT_PUBLIC_API_BASE_URL!);

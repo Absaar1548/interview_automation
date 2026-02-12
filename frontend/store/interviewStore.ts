@@ -68,9 +68,8 @@ export const useInterviewStore = create<InterviewStore>((set, get) => ({
     },
 
     fetchNextQuestion: async () => {
-        set({ error: null });
         if (get().state !== "IN_PROGRESS") return;
-
+        set({ error: null });
         try {
             const question = await interviewService.fetchNextQuestion();
             set({ currentQuestion: question, state: "QUESTION_ASKED" });

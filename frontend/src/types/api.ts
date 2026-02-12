@@ -1,5 +1,3 @@
-// TypeScript types mirroring backend contract from mock_backend_spec.md
-
 export type InterviewState =
     | "CREATED"
     | "RESUME_PARSED"
@@ -11,18 +9,32 @@ export type InterviewState =
     | "COMPLETED"
     | "TERMINATED";
 
+export type QuestionCategory = "CONVERSATIONAL" | "STATIC" | "CODING";
+
+export type AnswerMode = "AUDIO" | "CODE";
+
+export type Difficulty = "EASY" | "MEDIUM" | "HARD";
+
+export type Recommendation = "PROCEED" | "REJECT" | "REVIEW";
+
+export type FraudRisk = "LOW" | "MEDIUM" | "HIGH";
+
+export type EventType = "TAB_SWITCH" | "MULTI_FACE" | "VOICE_MISMATCH";
+
+export type ProctoringAction = "FLAG" | "TERMINATE" | "IGNORE";
+
 export interface QuestionResponse {
     question_id: string;
-    category: "CONVERSATIONAL" | "STATIC" | "CODING";
-    answer_mode: "AUDIO" | "CODE";
-    difficulty: "EASY" | "MEDIUM" | "HARD";
+    category: QuestionCategory;
+    answer_mode: AnswerMode;
+    difficulty: Difficulty;
     prompt: string;
     time_limit_sec: number;
 }
 
 export interface EvaluationSubmitRequest {
     question_id: string;
-    answer_type: "AUDIO" | "CODE";
+    answer_type: AnswerMode;
     answer_payload: string;
 }
 
@@ -32,20 +44,20 @@ export interface EvaluationSubmitResponse {
 
 export interface SummaryResponse {
     final_score: number;
-    recommendation: "PROCEED" | "REJECT" | "HOLD";
-    fraud_risk: "LOW" | "MEDIUM" | "HIGH";
+    recommendation: Recommendation;
+    fraud_risk: FraudRisk;
     strengths: string[];
     gaps: string[];
     notes: string;
 }
 
 export interface ProctoringEventRequest {
-    event_type: "MULTI_FACE" | "VOICE_MISMATCH" | "TAB_SWITCH";
+    event_type: EventType;
     confidence: number;
 }
 
 export interface ProctoringEventResponse {
-    action: "FLAG" | "TERMINATE" | "IGNORE";
+    action: ProctoringAction;
 }
 
 export interface CodeTemplateResponse {
@@ -61,5 +73,5 @@ export interface ConversationPromptResponse {
 export interface ApiError {
     error_code: string;
     message: string;
-    current_state?: InterviewState;
+    current_state?: InterviewState | null;
 }
