@@ -18,12 +18,25 @@ export default function InterviewPage() {
 
     useEffect(() => {
         if (!interviewId || !candidateToken) {
+            // Check localStorage first
+            const storedId = localStorage.getItem('interview_id');
+            const storedToken = localStorage.getItem('candidate_token');
+
+            if (storedId && storedToken) {
+                initialize(storedId, storedToken);
+                return;
+            }
+
             // START DEV BOOTSTRAP - Remove in Production
             if (process.env.NODE_ENV === "development" && !hasBootstrapped.current) {
                 hasBootstrapped.current = true;
-                // Add /api/v1 because NEXT_PUBLIC_API_BASE_URL is localhost:8000
-                fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/dev/bootstrap`)
-                    .then((res) => res.json())
+                const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+                
+                fetch(`${baseUrl}/api/v1/dev/bootstrap`)
+                    .then((res) => {
+                        if (!res.ok) throw new Error("Bootstrap request failed");
+                        return res.json();
+                    })
                     .then((data) => {
                         initialize(data.interview_id, data.candidate_token);
                     })
