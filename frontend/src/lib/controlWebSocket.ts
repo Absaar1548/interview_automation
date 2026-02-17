@@ -4,7 +4,7 @@ interface ConnectParams {
     onOpen: () => void;
     onTerminate: (reason: string) => void;
     onError: (error: Event) => void;
-    onClose: () => void;
+    onClose: (event: CloseEvent) => void;
 }
 
 class ControlWebSocket {
@@ -19,12 +19,14 @@ class ControlWebSocket {
             this.disconnect();
         }
 
-        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+        const baseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
         const wsUrl = baseUrl
             .replace(/^https:/, "wss:")
             .replace(/^http:/, "ws:");
 
-        this.ws = new WebSocket(`${wsUrl}/api/v1/proctoring/ws`);
+        const fullUrl = `${wsUrl}/api/v1/proctoring/ws`;
+        console.log(`[ControlWebSocket] Connecting to: ${fullUrl}`);
+        this.ws = new WebSocket(fullUrl);
 
         this.ws.onopen = () => {
             if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -61,15 +63,17 @@ class ControlWebSocket {
             onError(error);
         };
 
-        this.ws.onclose = () => {
+        this.ws.onclose = (event) => {
             this.stopHeartbeat();
-            onClose();
+            onClose(event);
         };
     }
 
     disconnect(): void {
         this.stopHeartbeat();
         if (this.ws) {
+            this.ws.onclose = null; // Prevent triggering onClose during manual disconnect
+            this.ws.onerror = null;
             this.ws.close();
             this.ws = null;
         }

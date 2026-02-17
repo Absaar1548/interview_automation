@@ -41,8 +41,14 @@ class InterviewService {
                 const err = error instanceof Error ? error : new Error("WebSocket connection error");
                 params.onError(err);
             },
-            onClose: () => {
+            onClose: (event: CloseEvent) => {
+                console.log(`[InterviewService] WebSocket Closed: ${event.code} - ${event.reason}`);
                 proctoringEngine.stop();
+                if (event.code === 1008) {
+                    // Invalid session/token -> Terminate/Error
+                    const error = new Error(`Session invalid or expired: ${event.reason}`);
+                    params.onError(error);
+                }
             },
         });
     }

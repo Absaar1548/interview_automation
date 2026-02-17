@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useInterviewStore } from "@/store/interviewStore";
 import InterviewShell from "@/components/interview/InterviewShell";
 
@@ -16,47 +17,29 @@ export default function InterviewPage() {
     const hasStarted = useRef(false);
     const hasBootstrapped = useRef(false);
 
+    const router = useRouter();
+
     useEffect(() => {
         if (!interviewId || !candidateToken) {
-            // Check localStorage first
-            const storedId = localStorage.getItem('interview_id');
-            const storedToken = localStorage.getItem('candidate_token');
-
-            if (storedId && storedToken) {
-                initialize(storedId, storedToken);
-                return;
-            }
-
-            // START DEV BOOTSTRAP - Remove in Production
-            if (process.env.NODE_ENV === "development" && !hasBootstrapped.current) {
-                hasBootstrapped.current = true;
-                const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-                
-                fetch(`${baseUrl}/api/v1/dev/bootstrap`)
-                    .then((res) => {
-                        if (!res.ok) throw new Error("Bootstrap request failed");
-                        return res.json();
-                    })
-                    .then((data) => {
-                        initialize(data.interview_id, data.candidate_token);
-                    })
-                    .catch((err) => console.error("Bootstrap failed", err));
-            }
-            // END DEV BOOTSTRAP
+            router.replace("/candidate");
             return;
         }
 
-        if (!isConnected) return;
+        if (!isConnected) {
+            initialize(interviewId, candidateToken);
+            return;
+        }
+
         if (hasStarted.current) return;
 
         hasStarted.current = true;
         startInterview();
-    }, [interviewId, candidateToken, isConnected, startInterview, initialize]);
+    }, [interviewId, candidateToken, isConnected, startInterview, initialize, router]);
 
     if (!interviewId || !candidateToken) {
         return (
-            <div className="flex h-screen items-center justify-center text-red-500 font-bold">
-                Interview session not initialized.
+            <div className="flex h-screen items-center justify-center text-gray-500">
+                Redirecting to dashboard...
             </div>
         );
     }
