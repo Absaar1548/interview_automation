@@ -15,7 +15,7 @@ interface AuthState {
     isLoading: boolean;
     error: string | null;
 
-    login: (credentials: AuthRequest) => Promise<void>;
+    login: (credentials: AuthRequest, type: 'admin' | 'candidate') => Promise<void>;
     register: (credentials: AuthRequest) => Promise<void>;
     logout: () => void;
 }
@@ -29,10 +29,13 @@ export const useAuthStore = create<AuthState>()(
             isLoading: false,
             error: null,
 
-            login: async (credentials) => {
+            login: async (credentials, type) => {
                 set({ isLoading: true, error: null });
                 try {
-                    const response = await authService.login(credentials);
+                    const response = type === 'admin'
+                        ? await authService.loginAdmin(credentials)
+                        : await authService.loginCandidate(credentials);
+
                     set({
                         user: { username: response.username, role: response.role },
                         token: response.access_token,
