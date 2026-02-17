@@ -85,10 +85,31 @@ export interface TokenResponse {
     access_token: string;
     token_type: string;
     username: string;
-    role: string;
+    role: "admin" | "candidate";
 }
 
-export interface RegisterResponse {
+// Candidate Profile (all fields optional)
+export interface CandidateProfile {
+    first_name?: string;
+    last_name?: string;
+    phone?: string;
+    resume_id?: string;
+    experience_years?: number;
+    skills?: string[];
+}
+
+// Full candidate registration payload for backend
+export interface CandidateRegistration {
     username: string;
-    message: string;
+    email: string;
+    password: string;
+    role: "candidate";
+    profile: CandidateProfile;
+}
+
+// Minimal request for admin to register candidate (frontend form)
+export interface CandidateRegistrationRequest {
+    username: string;
+    email: string;
+    password: string;
 }

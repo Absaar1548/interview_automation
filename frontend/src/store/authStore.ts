@@ -16,7 +16,6 @@ interface AuthState {
     error: string | null;
 
     login: (credentials: AuthRequest, type: 'admin' | 'candidate') => Promise<void>;
-    register: (credentials: AuthRequest) => Promise<void>;
     logout: () => void;
 }
 
@@ -42,20 +41,23 @@ export const useAuthStore = create<AuthState>()(
                         isAuthenticated: true,
                         isLoading: false,
                     });
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : "Login failed";
-                    set({ error: message, isLoading: false });
-                    throw error;
-                }
-            },
+                } catch (error: any) {
+                    let message = "Login failed. Please try again.";
 
-            register: async (credentials) => {
-                set({ isLoading: true, error: null });
-                try {
-                    await authService.register(credentials);
-                    set({ isLoading: false });
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : "Registration failed";
+                    // Handle specific error cases
+                    if (error.message) {
+                        const errorMsg = error.message.toLowerCase();
+                        if (errorMsg.includes("incorrect") || errorMsg.includes("credentials")) {
+                            message = "Invalid username or password.";
+                        } else if (errorMsg.includes("not a candidate") || errorMsg.includes("not an admin")) {
+                            message = "Access denied. Please use the correct login portal.";
+                        } else if (errorMsg.includes("fetch") || errorMsg.includes("network")) {
+                            message = "Unable to connect. Please try again later.";
+                        } else {
+                            message = error.message;
+                        }
+                    }
+
                     set({ error: message, isLoading: false });
                     throw error;
                 }

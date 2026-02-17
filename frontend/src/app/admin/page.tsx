@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuthStore } from '@/store/authStore';
+import { authService } from '@/lib/authService';
 
 interface DashboardStats {
     total_interviews: number;
@@ -20,30 +22,37 @@ interface InterviewSummary {
 
 export default function AdminDashboardPage() {
     const router = useRouter();
-    const [user, setUser] = useState<{ username: string; role: string } | null>(null);
+    const { user, isAuthenticated, logout } = useAuthStore();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [interviews, setInterviews] = useState<InterviewSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
+    // Registration modal state
+    const [showRegisterModal, setShowRegisterModal] = useState(false);
+    const [registerLoading, setRegisterLoading] = useState(false);
+    const [registerError, setRegisterError] = useState('');
+    const [registerSuccess, setRegisterSuccess] = useState('');
+    const [formData, setFormData] = useState({
+        username: '',
+        email: '',
+        password: '',
+        confirmPassword: ''
+    });
+
     useEffect(() => {
-        // Check auth
-        const storedUser = localStorage.getItem('user');
-        if (!storedUser) {
+        if (!isAuthenticated || !user) {
             router.push('/login/admin');
             return;
         }
 
-        const parsedUser = JSON.parse(storedUser);
-        if (parsedUser.role !== 'admin' && parsedUser.role !== 'hr') {
-            // Redirect non-Admin/HR users
-            router.push(parsedUser.role === 'candidate' ? '/candidate' : '/login');
+        if (user.role !== 'admin' && user.role !== 'hr') {
+            router.push(user.role === 'candidate' ? '/candidate' : '/login/admin');
             return;
         }
 
-        setUser(parsedUser);
         fetchData();
-    }, [router]);
+    }, [isAuthenticated, user, router]);
 
     const fetchData = async () => {
         try {
@@ -71,73 +80,163 @@ export default function AdminDashboardPage() {
     };
 
     const handleLogout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        localStorage.removeItem('interview_id');
+        logout();
         router.push('/login/admin');
     };
 
-    if (loading && !user) return <div className="min-h-screen flex items-center justify-center text-gray-600">Loading...</div>;
+    const handleRegisterCandidate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setRegisterError('');
+        setRegisterSuccess('');
+
+        // Validation
+        if (!formData.username || !formData.email || !formData.password) {
+            setRegisterError('All fields are required');
+            return;
+        }
+
+        if (formData.password.length < 6) {
+            setRegisterError('Password must be at least 6 characters');
+            return;
+        }
+
+        if (formData.password !== formData.confirmPassword) {
+            setRegisterError('Passwords do not match');
+            return;
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(formData.email)) {
+            setRegisterError('Please enter a valid email address');
+            return;
+        }
+
+        setRegisterLoading(true);
+
+        try {
+            await authService.registerCandidateByAdmin({
+                username: formData.username,
+                email: formData.email,
+                password: formData.password
+            });
+
+            setRegisterSuccess(`Candidate "${formData.username}" registered successfully!`);
+            setFormData({ username: '', email: '', password: '', confirmPassword: '' });
+
+            setTimeout(() => {
+                setShowRegisterModal(false);
+                setRegisterSuccess('');
+            }, 2000);
+        } catch (err: any) {
+            let message = 'Registration failed. Please try again.';
+            if (err.message) {
+                if (err.message.toLowerCase().includes('already')) {
+                    message = 'Username or email already exists';
+                } else {
+                    message = err.message;
+                }
+            }
+            setRegisterError(message);
+        } finally {
+            setRegisterLoading(false);
+        }
+    };
+
+    const openRegisterModal = () => {
+        setShowRegisterModal(true);
+        setRegisterError('');
+        setRegisterSuccess('');
+        setFormData({ username: '', email: '', password: '', confirmPassword: '' });
+    };
+
+    if (loading && !user) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-screen w-full p-8 relative">
-            {/* Background elements for glass effect - fixed position to stay behind scrollable content */}
-            <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10">
-                <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
-                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
-                <div className="absolute bottom-[-10%] left-[20%] w-[40%] h-[40%] bg-pink-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
-            </div>
-
-            <div className="max-w-7xl mx-auto">
-                {/* Header */}
-                <div className="flex justify-between items-center mb-8 glass-card p-6 rounded-2xl">
-                    <div>
-                        <h1 className="text-3xl font-bold text-gray-800">Admin Dashboard</h1>
-                        <p className="text-gray-600">Overview of interview process and candidates</p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <span className="text-sm font-medium text-gray-600">Welcome, {user?.username}</span>
-                        <button
-                            onClick={handleLogout}
-                            className="px-4 py-2 bg-white/80 border border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors shadow-sm font-medium"
-                        >
-                            Logout
-                        </button>
+        <div className="min-h-screen bg-gray-50">
+            {/* Header */}
+            <header className="bg-white shadow-sm border-b border-gray-200">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
+                            <p className="text-sm text-gray-600 mt-1">Welcome, {user?.username}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={openRegisterModal}
+                                className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 shadow-sm"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
+                                </svg>
+                                Register Candidate
+                            </button>
+                            <button
+                                onClick={handleLogout}
+                                className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                            >
+                                Logout
+                            </button>
+                        </div>
                     </div>
                 </div>
+            </header>
 
+            {/* Main Content */}
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {error && (
-                    <div className="bg-red-50/80 backdrop-blur-sm border border-red-100 text-red-700 p-4 rounded-2xl mb-8 shadow-sm">
+                    <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
                         {error}
                     </div>
                 )}
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                    <StatsCard title="Total Interviews" value={stats?.total_interviews || 0} color="blue" />
-                    <StatsCard title="Completed" value={stats?.completed || 0} color="green" />
-                    <StatsCard title="Pending Review" value={stats?.pending || 0} color="yellow" />
-                    <StatsCard title="Flagged for Fraud" value={stats?.flagged || 0} color="red" />
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Total Interviews</h3>
+                        <p className="text-3xl font-bold text-gray-900">{stats?.total_interviews || 0}</p>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Completed</h3>
+                        <p className="text-3xl font-bold text-green-600">{stats?.completed || 0}</p>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Pending Review</h3>
+                        <p className="text-3xl font-bold text-yellow-600">{stats?.pending || 0}</p>
+                    </div>
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Flagged</h3>
+                        <p className="text-3xl font-bold text-red-600">{stats?.flagged || 0}</p>
+                    </div>
                 </div>
 
                 {/* Interviews Table */}
-                <div className="glass-card rounded-2xl overflow-hidden shadow-lg border border-white/20">
-                    <div className="p-6 border-b border-gray-100 bg-white/40">
-                        <h2 className="text-xl font-bold text-gray-800">Recent Interviews</h2>
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200">
+                        <h2 className="text-lg font-semibold text-gray-900">Recent Interviews</h2>
                     </div>
                     <div className="overflow-x-auto">
-                        <table className="w-full text-left">
-                            <thead className="bg-gray-50/50 text-gray-500 uppercase text-xs font-semibold">
+                        <table className="w-full">
+                            <thead className="bg-gray-50">
                                 <tr>
-                                    <th className="px-6 py-4">Candidate Token</th>
-                                    <th className="px-6 py-4">Interview ID</th>
-                                    <th className="px-6 py-4">Date</th>
-                                    <th className="px-6 py-4">Status</th>
-                                    <th className="px-6 py-4 text-center">Trust Score</th>
-                                    <th className="px-6 py-4 text-right">Actions</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Candidate</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interview ID</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trust Score</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody className="bg-white divide-y divide-gray-200">
                                 {interviews.length === 0 ? (
                                     <tr>
                                         <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
@@ -146,24 +245,26 @@ export default function AdminDashboardPage() {
                                     </tr>
                                 ) : (
                                     interviews.map((interview) => (
-                                        <tr key={interview.interview_id} className="hover:bg-blue-50/30 transition-colors">
-                                            <td className="px-6 py-4 font-medium text-gray-900">{interview.candidate_token}</td>
-                                            <td className="px-6 py-4 text-gray-500 text-sm font-mono">{interview.interview_id.substring(0, 8)}...</td>
-                                            <td className="px-6 py-4 text-gray-600">
+                                        <tr key={interview.interview_id} className="hover:bg-gray-50">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                {interview.candidate_token}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
+                                                {interview.interview_id.substring(0, 8)}...
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                 {new Date(interview.created_at).toLocaleDateString()}
                                             </td>
-                                            <td className="px-6 py-4">
+                                            <td className="px-6 py-4 whitespace-nowrap">
                                                 <StatusBadge status={interview.state} />
                                             </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <div className="flex items-center justify-center gap-2">
-                                                    <span className={`font-bold px-2 py-1 rounded-lg ${interview.cheat_score > 50 ? 'bg-red-100/50 text-red-600' : 'bg-green-100/50 text-green-600'}`}>
-                                                        {Math.max(0, 100 - interview.cheat_score)}%
-                                                    </span>
-                                                </div>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                                <span className={`font-semibold ${interview.cheat_score > 50 ? 'text-red-600' : 'text-green-600'}`}>
+                                                    {Math.max(0, 100 - interview.cheat_score)}%
+                                                </span>
                                             </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <button className="text-blue-600 hover:text-blue-800 text-sm font-semibold hover:underline">
+                                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                                <button className="text-blue-600 hover:text-blue-800 font-medium">
                                                     View Report
                                                 </button>
                                             </td>
@@ -174,30 +275,139 @@ export default function AdminDashboardPage() {
                         </table>
                     </div>
                 </div>
-            </div>
-        </div>
-    );
-}
+            </main>
 
-function StatsCard({ title, value, color }: { title: string, value: number, color: string }) {
-    return (
-        <div className={`glass-card rounded-2xl p-6 border border-white/20 transition-transform hover:-translate-y-1`}>
-            <h3 className="text-sm font-semibold opacity-70 mb-1 text-gray-600">{title}</h3>
-            <p className="text-3xl font-bold text-gray-800">{value}</p>
+            {/* Registration Modal */}
+            {showRegisterModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg w-full max-w-md p-6 shadow-xl">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-xl font-bold text-gray-900">Register New Candidate</h2>
+                            <button
+                                onClick={() => setShowRegisterModal(false)}
+                                className="text-gray-400 hover:text-gray-600"
+                                disabled={registerLoading}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {registerSuccess && (
+                            <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                                </svg>
+                                {registerSuccess}
+                            </div>
+                        )}
+
+                        {registerError && (
+                            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                                </svg>
+                                {registerError}
+                            </div>
+                        )}
+
+                        <form onSubmit={handleRegisterCandidate} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                <input
+                                    type="text"
+                                    value={formData.username}
+                                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter username"
+                                    required
+                                    disabled={registerLoading}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                <input
+                                    type="email"
+                                    value={formData.email}
+                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Enter email address"
+                                    required
+                                    disabled={registerLoading}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                <input
+                                    type="password"
+                                    value={formData.password}
+                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Minimum 6 characters"
+                                    required
+                                    disabled={registerLoading}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                                <input
+                                    type="password"
+                                    value={formData.confirmPassword}
+                                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Confirm password"
+                                    required
+                                    disabled={registerLoading}
+                                />
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowRegisterModal(false)}
+                                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                                    disabled={registerLoading}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={registerLoading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {registerLoading ? (
+                                        <>
+                                            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Registering...
+                                        </>
+                                    ) : (
+                                        'Register Candidate'
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
 
 function StatusBadge({ status }: { status: string }) {
-    let classes = "bg-gray-100/50 text-gray-600 border-gray-200";
-    if (status === 'COMPLETED') classes = "bg-green-50/50 text-green-700 border border-green-100";
-    else if (status === 'IN_PROGRESS') classes = "bg-blue-50/50 text-blue-700 border border-blue-100";
-    else if (status === 'TERMINATED') classes = "bg-red-50/50 text-red-700 border border-red-100";
-    else if (status === 'CREATED' || status === 'READY') classes = "bg-yellow-50/50 text-yellow-700 border border-yellow-100";
+    let classes = "px-2.5 py-0.5 rounded-full text-xs font-semibold";
 
-    return (
-        <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold shadow-sm backdrop-blur-sm ${classes}`}>
-            {status}
-        </span>
-    );
+    if (status === 'COMPLETED') classes += " bg-green-100 text-green-800";
+    else if (status === 'IN_PROGRESS') classes += " bg-blue-100 text-blue-800";
+    else if (status === 'TERMINATED') classes += " bg-red-100 text-red-800";
+    else if (status === 'CREATED' || status === 'READY') classes += " bg-yellow-100 text-yellow-800";
+    else classes += " bg-gray-100 text-gray-800";
+
+    return <span className={classes}>{status}</span>;
 }

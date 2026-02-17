@@ -113,13 +113,6 @@ export default function CandidateLoginPage() {
                     </button>
                 </form>
 
-                <div className="mt-8 text-center text-sm text-gray-600">
-                    <p>Don't have an account?</p>
-                    <Link href="/register" className="inline-block mt-1 text-blue-600 hover:text-blue-700 font-semibold hover:underline transition-colors">
-                        Create an account
-                    </Link>
-                </div>
-
                 <div className="mt-6 pt-6 border-t border-gray-100 text-center">
                     <Link href="/" className="inline-flex items-center text-gray-500 hover:text-gray-700 hover:bg-gray-50 px-3 py-1.5 rounded-lg transition-colors text-sm font-medium">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 mr-1.5">
