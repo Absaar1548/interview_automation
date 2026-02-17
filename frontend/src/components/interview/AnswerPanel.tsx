@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect } from "react";
 import { answerWebSocket } from "@/lib/answerWebSocket";
-import CodeEditor from "./CodeEditor";
 
 interface AnswerPanelProps {
     mode: "AUDIO" | "CODE";
@@ -102,10 +101,11 @@ export default function AnswerPanel({
 
     if (mode === "CODE") {
         return (
-            <CodeEditor
+            <textarea
+                className="w-full h-64 p-4 border rounded font-mono text-sm"
                 value={value}
-                onChange={onChange}
-                questionId={questionId}
+                onChange={(e) => onChange(e.target.value)}
+                placeholder="Write your code here..."
             />
         );
     }
