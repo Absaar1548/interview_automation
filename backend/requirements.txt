@@ -3,4 +3,8 @@ uvicorn
 pydantic
 python-dotenv
 websockets
+motor
+passlib[argon2]
+python-jose[cryptography]
+python-multipart
 # Add other dependencies as needed
