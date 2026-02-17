@@ -70,6 +70,10 @@ def start_session(x_interview_id: str = Header(..., alias="X-Interview-Id")):
             "first_question_ready": True
         }
 
+    # Auto-advance if in RESUME_PARSED (Mock Logic to skip resume parsing step manually)
+    if session.state == InterviewState.RESUME_PARSED:
+        transition_state(session, InterviewState.READY)
+
     if session.state != InterviewState.READY:
         raise HTTPException(status_code=400, detail={
             "error_code": "INVALID_STATE",

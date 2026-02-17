@@ -74,15 +74,22 @@ async def proctoring_websocket(websocket: WebSocket):
         interview_id = data.get("interview_id")
         candidate_token = data.get("candidate_token")
         
+        print(f"DEBUG: WebSocket Handshake - ID: {interview_id}, Token: {candidate_token}")
         session = get_interview(interview_id)
         
         # Validate session
-        if not session or session.candidate_token != candidate_token:
+        if not session:
+            print(f"DEBUG: Session {interview_id} NOT FOUND")
+            await websocket.close(code=1008, reason="Invalid session or token")
+            return
+            
+        if session.candidate_token != candidate_token:
+            print(f"DEBUG: Token mismatch for session {interview_id}")
             await websocket.close(code=1008, reason="Invalid session or token")
             return
             
         # Validate state
-        if session.state not in [InterviewState.READY, InterviewState.IN_PROGRESS]:
+        if session.state not in [InterviewState.READY, InterviewState.IN_PROGRESS, InterviewState.RESUME_PARSED]:
             await websocket.close(code=1008, reason=f"Invalid state: {session.state.value}")
             return
             

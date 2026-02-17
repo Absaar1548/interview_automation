@@ -41,12 +41,15 @@ export const useInterviewStore = create<InterviewStore>((set, get) => ({
             interviewId,
             candidateToken,
             onConnected: () => {
+                console.log("[InterviewStore] WebSocket Connected");
                 set({ isConnected: true });
             },
             onTerminated: (reason: string) => {
+                console.log("[InterviewStore] Terminated:", reason);
                 set({ state: "TERMINATED", terminationReason: reason, isConnected: false, currentQuestion: null });
             },
             onError: (error: unknown) => {
+                console.error("[InterviewStore] Error:", error);
                 const errorMessage = error instanceof Error ? error.message : "Unknown error";
                 set({ error: errorMessage, isConnected: false });
             },

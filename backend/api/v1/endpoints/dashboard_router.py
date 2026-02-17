@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pydantic import BaseModel
 from datetime import datetime
 from mock_backend.interview_store import INTERVIEWS, InterviewState
@@ -43,13 +43,16 @@ def get_dashboard_stats():
     }
 
 @router.get("/interviews", response_model=List[InterviewSummary])
-def get_interviews():
+def get_interviews(candidate_token: Optional[str] = None):
     summary_list = []
     # Sort by created_at desc (newest first)
     # Note: InterviewSession in mock store might not have created_at populated by default if it's old code
     # But dataclasses usually work fine.
     
     sorted_sessions = sorted(INTERVIEWS.values(), key=lambda x: x.created_at, reverse=True)
+    
+    if candidate_token:
+        sorted_sessions = [s for s in sorted_sessions if s.candidate_token == candidate_token]
     
     for session in sorted_sessions:
         summary_list.append({

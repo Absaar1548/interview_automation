@@ -1,74 +1,100 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/authStore";
+import { useInterviewStore } from "@/store/interviewStore";
+import { dashboardService, InterviewSummary } from "@/lib/dashboardService";
 
 export default function CandidatePage() {
     const router = useRouter();
-    const [user, setUser] = useState<{ username: string; role: string } | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [hasActiveSession, setHasActiveSession] = useState(false);
+    const { user, isAuthenticated, logout } = useAuthStore();
+    const initializeInterview = useInterviewStore((s) => s.initialize);
 
+    // State to hold the fetched interview (if any)
+    const [interview, setInterview] = useState<InterviewSummary | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+
+    // 1. Authentication Check & Data Fetching
     useEffect(() => {
-        // Check if user is logged in
-        const storedUser = localStorage.getItem('user');
-        if (!storedUser) {
-            router.push('/login');
+        if (!isAuthenticated) {
+            router.push("/login");
             return;
         }
 
-        const userData = JSON.parse(storedUser);
-        setUser(userData);
-
-        // Check if there's an active interview session
-        const interviewId = localStorage.getItem('interview_id');
-        setHasActiveSession(!!interviewId);
-    }, [router]);
-
-    const handleStartInterview = async () => {
-        setError('');
-        setLoading(true);
-
-        try {
-            const response = await fetch('http://localhost:8000/api/v1/dev/bootstrap', {
-                method: 'GET',
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to create interview session');
+        const fetchDashboardData = async () => {
+            setLoading(true);
+            try {
+                const interviews = await dashboardService.getInterviews(user?.username);
+                if (interviews.length > 0) {
+                    setInterview(interviews[0]);
+                }
+            } catch (err: any) {
+                console.error("Dashboard fetch error:", err);
+                setError("Failed to load interview details. Please try again later.");
+            } finally {
+                setLoading(false);
             }
+        };
 
-            const data = await response.json();
+        if (user?.username) {
+            fetchDashboardData();
+        }
+    }, [isAuthenticated, user, router]);
 
-            // Store interview details
-            localStorage.setItem('interview_id', data.interview_id);
-            localStorage.setItem('candidate_token', data.candidate_token);
+    // 2. Action Handlers
+    const handleStartOrResumeInterview = () => {
+        if (!interview) return;
 
-            // Navigate to interview page
-            router.push('/interview');
+        // Initialize the interview store
+        initializeInterview(interview.interview_id, interview.candidate_token);
+
+        // Navigate to the interview runtime
+        router.push("/interview");
+    };
+
+    const handleDebugCreate = async () => {
+        if (!user) return;
+        setLoading(true);
+        try {
+            await dashboardService.createSession(user.username);
+            // Refresh dashboard
+            const interviews = await dashboardService.getInterviews(user.username);
+            if (interviews.length > 0) {
+                setInterview(interviews[0]);
+            }
         } catch (err: any) {
-            setError(err.message || 'Failed to start interview');
+            console.error("Debug create error:", err);
+            setError(err.message || "Failed to create debug session. You might have an active one.");
         } finally {
             setLoading(false);
         }
     };
 
-    const handleResumeInterview = () => {
-        router.push('/interview');
-    };
-
     const handleLogout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        localStorage.removeItem('interview_id');
-        localStorage.removeItem('candidate_token');
-        router.push('/login');
+        logout();
+        router.push("/login");
     };
 
-    if (!user) {
-        return null; // Will redirect to login
+    // 3. Render Loading State
+    if (loading) {
+        return (
+            <div className="min-h-screen w-full flex items-center justify-center bg-gray-900">
+                <div className="flex flex-col items-center">
+                    <svg className="animate-spin h-8 w-8 text-blue-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <p className="text-gray-400">Loading your dashboard...</p>
+                </div>
+            </div>
+        );
     }
+
+    if (!user) return null; // Should have redirected
+
+    const hasActiveSession = !!interview;
 
     return (
         <div className="min-h-screen w-full flex items-center justify-center bg-gray-900 p-4">
@@ -96,52 +122,54 @@ export default function CandidatePage() {
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-gray-300 mb-1">You have an active interview session</p>
-                                        <p className="text-sm text-gray-500">Resume your interview to continue</p>
+                                        <p className="text-gray-300 mb-1">
+                                            {interview.state === "COMPLETED"
+                                                ? "Interview Completed"
+                                                : "You have an active interview session"}
+                                        </p>
+                                        <p className="text-sm text-gray-500">
+                                            {interview.state === "COMPLETED"
+                                                ? "Thank you for your participation."
+                                                : `Status: ${interview.state}`}
+                                        </p>
+                                        {interview.state !== "COMPLETED" && (
+                                            <p className="text-xs text-mono text-gray-600 mt-1">ID: {interview.interview_id}</p>
+                                        )}
                                     </div>
-                                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                                    <div className={`w-3 h-3 rounded-full ${interview.state === "COMPLETED" ? "bg-gray-500" : "bg-green-500 animate-pulse"}`}></div>
                                 </div>
-                                <button
-                                    onClick={handleResumeInterview}
-                                    className="w-full py-3 px-4 bg-green-600 text-white rounded-lg font-bold shadow-lg hover:bg-green-700 transition-all duration-200 transform hover:-translate-y-0.5"
-                                >
-                                    Resume Interview
-                                </button>
+
+                                {interview.state !== "COMPLETED" && (
+                                    <button
+                                        onClick={handleStartOrResumeInterview}
+                                        className="w-full py-3 px-4 bg-green-600 text-white rounded-lg font-bold shadow-lg hover:bg-green-700 transition-all duration-200 transform hover:-translate-y-0.5"
+                                    >
+                                        {interview.state === "CREATED" || interview.state === "READY"
+                                            ? "Start Interview"
+                                            : "Resume Interview"}
+                                    </button>
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-gray-300 mb-1">No active interview session</p>
-                                        <p className="text-sm text-gray-500">Start a new interview when you're ready</p>
+                                        <p className="text-sm text-gray-500">Contact HR if you believe this is an error.</p>
                                     </div>
                                     <div className="w-3 h-3 bg-gray-600 rounded-full"></div>
                                 </div>
-                                <button
-                                    onClick={handleStartInterview}
-                                    disabled={loading}
-                                    className={`w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-bold shadow-lg hover:bg-blue-700 transition-all duration-200 transform hover:-translate-y-0.5 ${loading ? 'opacity-70 cursor-not-allowed' : ''
-                                        }`}
-                                >
-                                    {loading ? (
-                                        <div className="flex items-center justify-center">
-                                            <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                            </svg>
-                                            Creating Session...
-                                        </div>
-                                    ) : (
-                                        'Start New Interview'
-                                    )}
-                                </button>
+                                {/* No button to start manual interview since we auto-schedule */}
+                                <div className="p-4 bg-yellow-900/20 border border-yellow-700/50 rounded text-yellow-200 text-sm">
+                                    Waiting for interview assignment...
+                                </div>
                             </div>
                         )}
                     </div>
 
                     {/* Error Display */}
                     {error && (
-                        <div className="p-3 rounded-lg bg-red-900/50 border border-red-800 text-red-200 text-sm text-center">
+                        <div className="p-3 rounded-lg bg-red-900/50 border border-red-800 text-red-200 text-sm text-center mb-6">
                             {error}
                         </div>
                     )}
@@ -163,6 +191,16 @@ export default function CandidatePage() {
                             </div>
                         </div>
                     </div>
+                </div>
+
+                {/* Debug Section */}
+                <div className="mt-8 pt-8 border-t border-gray-700">
+                    <button
+                        onClick={handleDebugCreate}
+                        className="text-xs text-gray-500 hover:text-gray-300 underline"
+                    >
+                        [Debug] Create New Interview Session
+                    </button>
                 </div>
             </div>
         </div>

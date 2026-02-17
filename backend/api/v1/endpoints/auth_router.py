@@ -5,6 +5,7 @@ from datetime import timedelta
 from database.user_db import create_user, get_user_by_username, User, UserInDB
 from core.security import verify_password, get_password_hash, create_access_token
 from core.config import settings
+from mock_backend.interview_store import create_interview
 
 router = APIRouter()
 
@@ -41,6 +42,14 @@ async def register(request: AuthRequest):
     )
     
     await create_user(new_user)
+    
+    # Auto-schedule interview for the new candidate
+    try:
+        create_interview(request.username)
+    except ValueError:
+        # Should not happen for a new user, but log/ignore if it does
+        pass
+
     return {"username": request.username, "message": "User registered successfully"}
 
 @router.post("/login", response_model=Token)
