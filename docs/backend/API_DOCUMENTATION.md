@@ -541,3 +541,227 @@ If using a different port, update the CORS configuration in `app/main.py`.
 4. **Form Validation**: Validate email format and required fields on frontend before submission
 5. **Profile Fields**: All profile fields are optional, but the profile object itself is required
 6. **Skills Array**: For candidates, skills should be an array of strings (can be empty)
+
+---
+
+## Interview Scheduling Endpoints (Admin Only)
+
+> All endpoints below require `Authorization: Bearer <admin_jwt_token>`.
+> Candidates will receive `403 Forbidden` if they attempt to call these endpoints.
+
+### Base URL for Scheduling
+```
+http://localhost:8000/api/v1/admin/interviews
+```
+
+---
+
+### 1. Schedule Interview
+
+**Endpoint:** `POST /admin/interviews/schedule`
+
+**Description:** Create a new scheduled interview for a candidate. Validates eligibility, checks for existing active interviews, verifies template, and embeds mock curated questions.
+
+**Request Body:**
+```json
+{
+  "candidate_id": "65d4f1a2b3c4d5e6f7a8b9c0",
+  "template_id":  "65d4f1a2b3c4d5e6f7a8b9d1",
+  "scheduled_at": "2026-03-01T10:00:00Z"
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `candidate_id` | string (ObjectId) | ✅ | Must reference a candidate user |
+| `template_id` | string (ObjectId) | ✅ | Must reference an active template |
+| `scheduled_at` | string (ISO 8601 UTC) | ✅ | Must be a future datetime |
+
+**Success Response (201 Created):**
+```json
+{
+  "id": "65d4f1a2b3c4d5e6f7a8baff",
+  "candidate_id": "65d4f1a2b3c4d5e6f7a8b9c0",
+  "template_id":  "65d4f1a2b3c4d5e6f7a8b9d1",
+  "assigned_by":  "65d4f1a2b3c4d5e6f7a8b9aa",
+  "status": "scheduled",
+  "scheduled_at": "2026-03-01T10:00:00Z",
+  "curated_questions": {
+    "template_id": "65d4f1a2b3c4d5e6f7a8b9d1",
+    "generated_from": {
+      "resume_id": "65d4f1a2b3c4d5e6f7a8b800",
+      "jd_id": "mock_jd_001"
+    },
+    "generated_at": "2026-02-19T08:00:00Z",
+    "generation_method": "mock_static",
+    "questions": [
+      {
+        "question_id": "65d4f1a2b3c4d5e6f7a8c001",
+        "order": 1,
+        "customized_prompt": "Explain how you would use decorators to implement a retry mechanism.",
+        "difficulty": "medium",
+        "time_limit_sec": 120,
+        "category": "python",
+        "tags": ["decorators", "resilience", "production"]
+      }
+    ]
+  },
+  "created_at": "2026-02-19T08:00:00Z"
+}
+```
+
+**Error Responses:**
+
+| Code | Condition | `detail` |
+|------|-----------|---------|
+| `400` | Candidate role is not "candidate" | `"User is not a candidate"` |
+| `400` | Candidate account is inactive | `"Candidate account is inactive"` |
+| `400` | Template is inactive | `"Interview template is not active"` |
+| `400` | `scheduled_at` is in the past | `"scheduled_at must be a future datetime (UTC)"` |
+| `401` | Missing/invalid JWT | `"Could not validate credentials"` |
+| `403` | Caller is not admin | `"The user doesn't have enough privileges"` |
+| `404` | Candidate not found | `"Candidate not found"` |
+| `404` | Template not found | `"Interview template not found"` |
+| `409` | Active interview already exists | `"Candidate already has an active interview (status: scheduled or in_progress)"` |
+| `422` | Invalid ObjectId format | FastAPI validation error |
+
+---
+
+### 2. Reschedule Interview
+
+**Endpoint:** `PUT /admin/interviews/{id}/reschedule`
+
+**Description:** Move an already-scheduled interview to a new future datetime. Only works when `status == "scheduled"`.
+
+**Path Parameter:** `id` — ObjectId of the interview
+
+**Request Body:**
+```json
+{
+  "scheduled_at": "2026-03-05T14:00:00Z"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "id": "65d4f1a2b3c4d5e6f7a8baff",
+  "status": "scheduled",
+  "scheduled_at": "2026-03-05T14:00:00Z",
+  "updated_at": "2026-02-19T09:00:00Z"
+}
+```
+
+**Error Responses:**
+
+| Code | Condition | `detail` |
+|------|-----------|---------|
+| `400` | `scheduled_at` is past | `"scheduled_at must be a future datetime (UTC)"` |
+| `401` | Missing/invalid JWT | `"Could not validate credentials"` |
+| `403` | Caller is not admin | `"The user doesn't have enough privileges"` |
+| `404` | Interview not found | `"Interview not found"` |
+| `409` | Status is not `"scheduled"` | `"Only scheduled interviews can be rescheduled"` |
+| `422` | Invalid ObjectId | FastAPI validation error |
+
+---
+
+### 3. Cancel Interview
+
+**Endpoint:** `PUT /admin/interviews/{id}/cancel`
+
+**Description:** Cancel a non-completed interview. Sets `status` to `"cancelled"`. The document is **never deleted**.
+
+**Path Parameter:** `id` — ObjectId of the interview
+
+**Request Body (optional):**
+```json
+{
+  "reason": "Candidate withdrew application"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "id": "65d4f1a2b3c4d5e6f7a8baff",
+  "status": "cancelled",
+  "cancelled_at": "2026-02-19T09:30:00Z",
+  "reason": "Candidate withdrew application"
+}
+```
+
+**Error Responses:**
+
+| Code | Condition | `detail` |
+|------|-----------|---------|
+| `401` | Missing/invalid JWT | `"Could not validate credentials"` |
+| `403` | Caller is not admin | `"The user doesn't have enough privileges"` |
+| `404` | Interview not found | `"Interview not found"` |
+| `409` | Status is `"completed"` | `"Completed interviews cannot be cancelled"` |
+| `422` | Invalid ObjectId | FastAPI validation error |
+
+---
+
+### TypeScript Types for Scheduling
+
+```typescript
+// Request types
+interface ScheduleInterviewRequest {
+  candidate_id: string;
+  template_id: string;
+  scheduled_at: string; // ISO 8601 UTC
+}
+
+interface RescheduleInterviewRequest {
+  scheduled_at: string; // ISO 8601 UTC
+}
+
+interface CancelInterviewRequest {
+  reason?: string;
+}
+
+// Response types
+interface CuratedQuestion {
+  question_id: string;
+  order: number;
+  customized_prompt: string;
+  difficulty: "easy" | "medium" | "hard";
+  time_limit_sec: number;
+  category: string;
+  tags: string[];
+}
+
+interface CuratedQuestionsPayload {
+  template_id: string;
+  generated_from: { resume_id: string; jd_id: string };
+  generated_at: string;
+  generation_method: string;
+  questions: CuratedQuestion[];
+}
+
+interface ScheduleInterviewResponse {
+  id: string;
+  candidate_id: string;
+  template_id: string;
+  assigned_by: string;
+  status: "scheduled";
+  scheduled_at: string;
+  curated_questions: CuratedQuestionsPayload;
+  created_at: string;
+}
+
+interface RescheduleInterviewResponse {
+  id: string;
+  status: "scheduled";
+  scheduled_at: string;
+  updated_at: string;
+}
+
+interface CancelInterviewResponse {
+  id: string;
+  status: "cancelled";
+  cancelled_at: string;
+  reason?: string;
+}
+```
+
