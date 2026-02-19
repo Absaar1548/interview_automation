@@ -8,8 +8,12 @@ from enum import Enum
 
 class Candidate(Document):
     username: str
+    email: EmailStr
     hashed_password: str
+    job_description: Optional[str] = None
+    resume_path: Optional[str] = None
     is_active: bool = True
+    login_disabled: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
 
@@ -17,12 +21,14 @@ class Candidate(Document):
         name = "candidates"  # Collection name
         indexes = [
             [("username", 1)],  # Unique index on username
+            [("email", 1)],  # Unique index on email
         ]
 
     class Config:
         json_schema_extra = {
             "example": {
                 "username": "candidate123",
+                "email": "candidate@example.com",
                 "is_active": True
             }
         }

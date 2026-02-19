@@ -8,5 +8,7 @@ python-multipart
 motor
 beanie
 pymongo
-pip install argon2-cffi
+argon2-cffi
+aiosmtplib
+email-validator
 # Add other dependencies as needed

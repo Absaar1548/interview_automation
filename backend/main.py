@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from backend.api.v1.endpoints import (
     session_router,
     question_router,
@@ -14,6 +15,15 @@ from backend.api.v1.endpoints import (
 from backend.database.connection import connect_to_mongo, close_mongo_connection
 
 app = FastAPI(title="AI Interview Automation Backend")
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Add your frontend URLs
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize MongoDB connection on startup
 @app.on_event("startup")

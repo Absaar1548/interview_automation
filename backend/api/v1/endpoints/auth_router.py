@@ -1,13 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from bson import ObjectId
+import secrets
+import os
 from backend.core.config import settings
+from pathlib import Path
 from backend.core.security import verify_password, get_password_hash, create_access_token
 from backend.database.schema import Candidate, HR, DeliveryHead
+from backend.services.email_service import email_service
 
 router = APIRouter()
 
@@ -30,8 +34,18 @@ class DeliveryHeadRegisterRequest(BaseModel):
 
 # Pydantic Models for Login Requests
 class CandidateLoginRequest(BaseModel):
-    username: str
+    email: EmailStr
     password: str
+
+class AdminLoginRequest(BaseModel):
+    email: EmailStr
+    
+    @field_validator('email')
+    @classmethod
+    def validate_coforge_email(cls, v):
+        if not v.endswith('@coforge.com'):
+            raise ValueError('Admin email must be from @coforge.com domain')
+        return v
 
 class HRLoginRequest(BaseModel):
     username: str
@@ -47,6 +61,7 @@ class DeliveryHeadLoginRequest(BaseModel):
 class CandidateResponse(BaseModel):
     id: str
     username: str
+    email: str
     is_active: bool
     created_at: datetime
 
@@ -116,14 +131,14 @@ async def get_current_candidate(token: str = Depends(oauth2_scheme)):
     )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        username: str = payload.get("sub")
+        email: str = payload.get("sub")
         user_type: str = payload.get("user_type")
-        if username is None or user_type != "candidate":
+        if email is None or user_type != "candidate":
             raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    candidate = await Candidate.find_one(Candidate.username == username)
+    candidate = await Candidate.find_one(Candidate.email == email)
     if candidate is None:
         raise credentials_exception
     if not candidate.is_active:
@@ -139,14 +154,14 @@ async def get_current_hr(token: str = Depends(oauth2_scheme)):
     )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        username: str = payload.get("sub")
+        email: str = payload.get("sub")
         user_type: str = payload.get("user_type")
-        if username is None or user_type != "hr":
+        if email is None or user_type != "hr":
             raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    hr = await HR.find_one(HR.username == username)
+    hr = await HR.find_one(HR.email == email)
     if hr is None:
         raise credentials_exception
     if not hr.is_active:
@@ -162,19 +177,41 @@ async def get_current_delivery_head(token: str = Depends(oauth2_scheme)):
     )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        username: str = payload.get("sub")
+        email: str = payload.get("sub")
         user_type: str = payload.get("user_type")
-        if username is None or user_type != "delivery_head":
+        if email is None or user_type != "delivery_head":
             raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    dh = await DeliveryHead.find_one(DeliveryHead.username == username)
+    dh = await DeliveryHead.find_one(DeliveryHead.email == email)
     if dh is None:
         raise credentials_exception
     if not dh.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return dh
+
+async def get_current_admin(token: str = Depends(oauth2_scheme)):
+    """Get current authenticated admin from token - no database validation"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        email: str = payload.get("sub")
+        user_type: str = payload.get("user_type")
+        if email is None or user_type != "admin":
+            raise credentials_exception
+        # Validate email domain
+        if not email.endswith("@coforge.com"):
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    # Return a simple dict with email info (no database lookup)
+    return {"email": email, "user_type": user_type}
 
 # Registration Routes
 @router.post("/register/candidate", response_model=CandidateResponse, status_code=status.HTTP_201_CREATED)
@@ -264,26 +301,91 @@ async def register_delivery_head(register_data: DeliveryHeadRegisterRequest):
     await new_dh.insert()
     return new_dh
 
+@router.post("/admin/register-candidate", response_model=CandidateResponse, status_code=status.HTTP_201_CREATED)
+async def admin_register_candidate(
+    current_admin = Depends(get_current_admin),
+    candidate_name: str = Form(...),
+    candidate_email: EmailStr = Form(...),
+    job_description: str = Form(...),
+    resume: UploadFile = File(...)
+):
+    """
+    Admin endpoint to register a new candidate with job description and resume.
+    Generates a random password and sends it via email.
+    """
+    # Check if candidate already exists
+    existing_candidate = await Candidate.find_one(Candidate.email == candidate_email)
+    if existing_candidate:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Candidate with this email already exists"
+        )
+    
+    # Generate random password
+    password = secrets.token_urlsafe(12)
+    hashed_password = get_password_hash(password)
+    
+    # Create uploads directory if it doesn't exist
+    # Get backend directory (parent of api directory)
+    backend_dir = Path(__file__).resolve().parent.parent.parent.parent
+    upload_dir = backend_dir / "uploads" / "resumes"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save resume file
+    file_extension = os.path.splitext(resume.filename)[1]
+    resume_filename = f"{candidate_email.replace('@', '_at_')}_{secrets.token_hex(8)}{file_extension}"
+    resume_path = upload_dir / resume_filename
+    
+    with open(resume_path, "wb") as buffer:
+        content = await resume.read()
+        buffer.write(content)
+    
+    # Store relative path in database
+    resume_path_str = str(resume_path.relative_to(backend_dir))
+    
+    # Create username from email (before @)
+    username = candidate_email.split('@')[0]
+    
+    # Create new candidate
+    new_candidate = Candidate(
+        username=username,
+        email=candidate_email,
+        hashed_password=hashed_password,
+        job_description=job_description,
+        resume_path=resume_path_str,
+        is_active=True
+    )
+    await new_candidate.insert()
+    
+    # Send password email to candidate
+    await email_service.send_candidate_password_email(
+        candidate_email=candidate_email,
+        candidate_name=candidate_name,
+        password=password
+    )
+    
+    return new_candidate
+
 # Login Routes
 @router.post("/login/candidate", response_model=Token)
 async def candidate_login(login_data: CandidateLoginRequest):
     """
-    Candidate login endpoint - requires username and password
+    Candidate login endpoint - requires email and password
     """
-    # Find candidate by username
-    candidate = await Candidate.find_one(Candidate.username == login_data.username)
+    # Find candidate by email
+    candidate = await Candidate.find_one(Candidate.email == login_data.email)
     
     if not candidate:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password"
+            detail="Incorrect email or password"
         )
     
     # Verify password
     if not verify_password(login_data.password, candidate.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password"
+            detail="Incorrect email or password"
         )
     
     # Check if candidate is active
@@ -293,11 +395,18 @@ async def candidate_login(login_data: CandidateLoginRequest):
             detail="Inactive user"
         )
     
+    # Check if login is disabled
+    if candidate.login_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Login has been disabled for this account. Please contact the administrator."
+        )
+    
     # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={
-            "sub": candidate.username,
+            "sub": candidate.email,
             "user_type": "candidate"
         },
         expires_delta=access_token_expires
@@ -310,7 +419,40 @@ async def candidate_login(login_data: CandidateLoginRequest):
         "user_type": "candidate",
         "user_data": {
             "id": str(candidate.id),
-            "username": candidate.username
+            "username": candidate.username,
+            "email": candidate.email
+        }
+    }
+
+@router.post("/login/admin", response_model=Token)
+async def admin_login(login_data: AdminLoginRequest):
+    """
+    Admin login endpoint - requires email only (must be @coforge.com)
+    No database validation, just checks email domain
+    """
+    # Email domain validation is already done in AdminLoginRequest validator
+    # Extract username from email (part before @)
+    username = login_data.email.split('@')[0]
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={
+            "sub": login_data.email,
+            "user_type": "admin"
+        },
+        expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user_type": "admin",
+        "user_data": {
+            "id": login_data.email,  # Use email as ID since no database record
+            "username": username,
+            "email": login_data.email
         }
     }
 
@@ -451,3 +593,61 @@ async def hr_logout(current_hr: HR = Depends(get_current_hr)):
 async def delivery_head_logout(current_dh: DeliveryHead = Depends(get_current_delivery_head)):
     """Delivery Head logout endpoint"""
     return {"message": "Successfully logged out"}
+
+# Admin endpoints for candidate management
+@router.get("/admin/candidates")
+async def get_all_candidates(current_admin = Depends(get_current_admin)):
+    """
+    Get all registered candidates (admin only)
+    """
+    # Use raw MongoDB query to handle old records that might be missing email field
+    from backend.database.connection import get_database
+    db = await get_database()
+    candidates_collection = db.candidates
+    
+    candidates_list = []
+    async for doc in candidates_collection.find({}):
+        # Skip candidates without email field (old records)
+        if 'email' not in doc or not doc.get('email'):
+            continue
+            
+        candidates_list.append({
+            "id": str(doc.get('_id', '')),
+            "username": doc.get('username', 'N/A'),
+            "email": doc.get('email', ''),
+            "is_active": doc.get('is_active', True),
+            "login_disabled": doc.get('login_disabled', False),
+            "created_at": doc.get('created_at'),
+            "job_description": (
+                doc.get('job_description', '')[:100] + "..." 
+                if doc.get('job_description') and len(doc.get('job_description', '')) > 100 
+                else doc.get('job_description')
+            )
+        })
+    
+    return candidates_list
+
+@router.post("/admin/candidates/{candidate_id}/toggle-login")
+async def toggle_candidate_login(candidate_id: str, current_admin = Depends(get_current_admin)):
+    """
+    Toggle candidate login status (disable/enable) - admin only
+    """
+    try:
+        candidate = await Candidate.get(candidate_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidate not found"
+        )
+    
+    # Toggle login_disabled status
+    candidate.login_disabled = not candidate.login_disabled
+    candidate.updated_at = datetime.utcnow()
+    await candidate.save()
+    
+    return {
+        "message": f"Candidate login has been {'disabled' if candidate.login_disabled else 'enabled'}",
+        "candidate_id": str(candidate.id),
+        "email": candidate.email,
+        "login_disabled": candidate.login_disabled
+    }
