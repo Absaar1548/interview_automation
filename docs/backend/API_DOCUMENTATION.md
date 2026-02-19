@@ -2,16 +2,16 @@
 
 ## Base URL
 ```
-http://localhost:8000/api/v1/auth
+http://localhost:8000/api/v1
 ```
 
 ---
 
-## Endpoints
+## Auth Endpoints
 
 ### 1. Register Candidate
 
-**Endpoint:** `POST /register/candidate`
+**Endpoint:** `POST /auth/register/candidate`
 
 **Description:** Register a new candidate user with profile information.
 
@@ -88,7 +88,7 @@ or
 
 ### 2. Register Admin
 
-**Endpoint:** `POST /register/admin`
+**Endpoint:** `POST /auth/register/admin`
 
 **Description:** Register a new admin user with profile information.
 
@@ -136,7 +136,7 @@ Same as candidate registration endpoint.
 
 ### 3. Login Candidate
 
-**Endpoint:** `POST /login/candidate`
+**Endpoint:** `POST /auth/login/candidate`
 
 **Description:** Authenticate a candidate user.
 
@@ -171,7 +171,7 @@ Same as candidate registration endpoint.
 }
 ```
 
-- **403 Forbidden** - User is not a candidate
+- **403 Forbidden** - User is not a candidate or login is disabled.
 ```json
 {
   "detail": "User is not a candidate"
@@ -182,7 +182,7 @@ Same as candidate registration endpoint.
 
 ### 4. Login Admin
 
-**Endpoint:** `POST /login/admin`
+**Endpoint:** `POST /auth/login/admin`
 
 **Description:** Authenticate an admin user.
 
@@ -221,6 +221,149 @@ Same as candidate registration endpoint.
 ```json
 {
   "detail": "User is not an admin"
+}
+```
+
+---
+
+### 5. Get Current User
+
+**Endpoint:** `GET /auth/me`
+
+**Description:** Get the profile of the currently logged-in user.
+
+**Headers:**
+- `Authorization`: `Bearer <token>`
+
+**Success Response (200):**
+Returns the full user object including profile details.
+```json
+{
+  "_id": "65d4...",
+  "username": "john_doe",
+  "email": "john.doe@example.com",
+  "role": "candidate",
+  "is_active": true,
+  "profile": { ... },
+  "created_at": "2024-02-17T..."
+}
+```
+
+---
+
+### 6. Logout
+
+**Endpoint:** `POST /auth/logout`
+
+**Description:** Logs out the user (client-side token removal expected).
+
+**Success Response (200):**
+```json
+{
+  "message": "Successfully logged out"
+}
+```
+
+---
+
+## Admin Features
+
+### 1. Register Candidate (Admin)
+
+**Endpoint:** `POST /auth/admin/register-candidate`
+
+**Description:** Admin creates a new candidate and triggers an email invitation.
+
+**Headers:**
+- `Authorization`: `Bearer <admin_token>`
+- `Content-Type`: `multipart/form-data`
+
+**Form Data:**
+- `candidate_name` (string)
+- `candidate_email` (string)
+- `job_description` (string)
+- `resume` (file)
+
+**Success Response (201):**
+```json
+{
+  "id": "65d4...",
+  "username": "john",
+  "email": "john@example.com",
+  "is_active": true,
+  "login_disabled": false,
+  "created_at": "...",
+  "job_description": "..."
+}
+```
+
+---
+
+### 2. Get All Candidates
+
+**Endpoint:** `GET /auth/admin/candidates`
+
+**Description:** Retrieve a list of all registered candidates.
+
+**Headers:**
+- `Authorization`: `Bearer <admin_token>`
+
+**Success Response (200):**
+```json
+[
+  {
+    "id": "65d4...",
+    "username": "john",
+    "email": "john@example.com",
+    "is_active": true,
+    "login_disabled": false,
+    "created_at": "..."
+  },
+  ...
+]
+```
+
+---
+
+### 3. Toggle Candidate Login
+
+**Endpoint:** `POST /auth/admin/candidates/{candidate_id}/toggle-login`
+
+**Description:** Enable or disable a candidate's ability to login.
+
+**Headers:**
+- `Authorization`: `Bearer <admin_token>`
+
+**Path Parameters:**
+- `candidate_id`: ID of the candidate.
+
+**Success Response (200):**
+```json
+{
+  "message": "Candidate login has been disabled",
+  "candidate_id": "65d4...",
+  "email": "john@example.com",
+  "login_disabled": true
+}
+```
+
+---
+
+## Dashboard Endpoints
+
+### 1. Get Dashboard Stats
+
+**Endpoint:** `GET /dashboard/stats`
+
+**Description:** Get aggregated statistics for the dashboard.
+
+**Success Response (200):**
+```json
+{
+  "total_interviews": 24,
+  "completed": 15,
+  "pending": 7,
+  "flagged": 2
 }
 ```
 
@@ -277,6 +420,24 @@ interface AuthResponse {
   token_type: string;
   username: string;
   role: "admin" | "candidate";
+}
+
+// Candidate Management
+interface CandidateResponse {
+  id: string;
+  username: string;
+  email: string;
+  is_active: boolean;
+  login_disabled: boolean;
+  created_at: string;
+  job_description?: string;
+}
+
+interface DashboardStats {
+  total_interviews: number;
+  completed: number;
+  pending: number;
+  flagged: number;
 }
 ```
 
@@ -367,7 +528,6 @@ const handleCandidateRegistration = async (formData: CandidateRegistration) => {
 
 The backend is configured with CORS to allow requests from:
 - `http://localhost:3000` (Next.js default)
-- `http://localhost:5173` (Vite default)
 
 If using a different port, update the CORS configuration in `app/main.py`.
 
