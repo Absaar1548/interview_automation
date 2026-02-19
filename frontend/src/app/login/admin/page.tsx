@@ -50,7 +50,7 @@ export default function AdminLoginPage() {
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <form onSubmit={handleSubmit} className="space-y-5" suppressHydrationWarning>
                     <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-1.5 ml-1">Username</label>
                         <div className="relative group">
@@ -66,6 +66,7 @@ export default function AdminLoginPage() {
                                 className="w-full pl-10 pr-4 py-3 bg-white/50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-500/50 focus:border-gray-500 transition-all placeholder:text-gray-400 text-gray-800"
                                 placeholder="Enter admin username"
                                 required
+                                suppressHydrationWarning
                             />
                         </div>
                     </div>
@@ -85,6 +86,7 @@ export default function AdminLoginPage() {
                                 className="w-full pl-10 pr-4 py-3 bg-white/50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-500/50 focus:border-gray-500 transition-all placeholder:text-gray-400 text-gray-800"
                                 placeholder="Enter admin password"
                                 required
+                                suppressHydrationWarning
                             />
                         </div>
                     </div>
@@ -93,6 +95,7 @@ export default function AdminLoginPage() {
                         type="submit"
                         disabled={isLoading}
                         className="w-full bg-gray-800 text-white py-3.5 rounded-xl hover:bg-gray-900 transition-all duration-300 font-semibold shadow-lg shadow-gray-500/30 hover:shadow-gray-500/50 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
+                        suppressHydrationWarning
                     >
                         {isLoading ? (
                             <>

@@ -11,16 +11,16 @@ export const authService = {
     },
 
     registerCandidateByAdmin: async (request: CandidateRegistrationRequest): Promise<TokenResponse> => {
-        // Build the full payload as per backend API requirements
-        // Explicitly set optional fields to null/undefined or empty arrays to satisfy strict backend validation
+        // ... (Keep existing implementation for backward compatibility if needed, or deprecate)
+        // For now, I will modify this to use the new route or create a new method.
+        // The instruction was to "Add registerCandidateWithResume".
+        // Let's add the new method.
         const payload: CandidateRegistration = {
             username: request.username,
             email: request.email,
             password: request.password,
             role: "candidate",
             profile: {
-                // We must provide at least one field or ensure the structure matches CandidateProfile
-                // to avoid ambiguity with other profile types in the backend Union
                 skills: [],
                 experience_years: 0,
                 first_name: "",
@@ -31,8 +31,19 @@ export const authService = {
         return apiClient.post<TokenResponse, CandidateRegistration>("/api/v1/auth/register/candidate", payload);
     },
 
+    registerCandidateWithResume: async (formData: FormData): Promise<import("@/types/api").CandidateResponse> => {
+        // Last argument true -> isFormData
+        return apiClient.post<import("@/types/api").CandidateResponse, FormData>(
+            "/api/v1/auth/admin/register-candidate",
+            formData,
+            false,
+            true
+        );
+    },
+
     logout: () => {
-        localStorage.removeItem("auth_token");
-        localStorage.removeItem("auth_user");
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem("auth-storage");
+        }
     }
 };

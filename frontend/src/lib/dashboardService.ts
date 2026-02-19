@@ -19,5 +19,16 @@ export const dashboardService = {
 
     createSession: async (candidateToken: string): Promise<any> => {
         return apiClient.post("/api/v1/session/init", { candidate_token: candidateToken });
+    },
+
+    getCandidates: async (): Promise<import("@/types/api").CandidateResponse[]> => {
+        return apiClient.get<import("@/types/api").CandidateResponse[]>("/api/v1/auth/admin/candidates");
+    },
+
+    toggleCandidateLogin: async (candidateId: string): Promise<import("@/types/api").ToggleLoginResponse> => {
+        return apiClient.post<import("@/types/api").ToggleLoginResponse, {}>(
+            `/api/v1/auth/admin/candidates/${candidateId}/toggle-login`,
+            {}
+        );
     }
 };

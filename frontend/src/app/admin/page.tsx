@@ -1,9 +1,12 @@
 'use client';
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { authService } from '@/lib/authService';
+import { dashboardService } from '@/lib/dashboardService';
+import { CandidateResponse } from '@/types/api';
 
 interface DashboardStats {
     total_interviews: number;
@@ -12,19 +15,11 @@ interface DashboardStats {
     flagged: number;
 }
 
-interface InterviewSummary {
-    interview_id: string;
-    candidate_token: string;
-    state: string;
-    cheat_score: number;
-    created_at: string;
-}
-
 export default function AdminDashboardPage() {
     const router = useRouter();
     const { user, isAuthenticated, logout } = useAuthStore();
     const [stats, setStats] = useState<DashboardStats | null>(null);
-    const [interviews, setInterviews] = useState<InterviewSummary[]>([]);
+    const [candidates, setCandidates] = useState<CandidateResponse[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -33,12 +28,12 @@ export default function AdminDashboardPage() {
     const [registerLoading, setRegisterLoading] = useState(false);
     const [registerError, setRegisterError] = useState('');
     const [registerSuccess, setRegisterSuccess] = useState('');
-    const [formData, setFormData] = useState({
-        username: '',
-        email: '',
-        password: '',
-        confirmPassword: ''
-    });
+
+    // New Form State excluding password
+    const [candidateName, setCandidateName] = useState('');
+    const [email, setEmail] = useState('');
+    const [jobDescription, setJobDescription] = useState('');
+    const [resumeFile, setResumeFile] = useState<File | null>(null);
 
     useEffect(() => {
         if (!isAuthenticated || !user) {
@@ -56,24 +51,21 @@ export default function AdminDashboardPage() {
 
     const fetchData = async () => {
         try {
+            // Fetch stats (mocked for now or existing) and now Candidates list
             const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
-            const [statsRes, interviewsRes] = await Promise.all([
-                fetch(`${baseUrl}/api/v1/dashboard/stats`),
-                fetch(`${baseUrl}/api/v1/dashboard/interviews`)
+            // Parallel fetch
+            const [statsRes, candidatesData] = await Promise.all([
+                fetch(`${baseUrl}/api/v1/dashboard/stats`).then(res => res.ok ? res.json() : { total_interviews: 0, completed: 0, pending: 0, flagged: 0 }),
+                dashboardService.getCandidates()
             ]);
 
-            if (!statsRes.ok || !interviewsRes.ok) {
-                throw new Error('Failed to fetch dashboard data');
-            }
+            setStats(statsRes);
+            setCandidates(candidatesData);
 
-            const statsData = await statsRes.json();
-            const interviewsData = await interviewsRes.json();
-
-            setStats(statsData);
-            setInterviews(interviewsData);
         } catch (err: any) {
-            setError(err.message || 'An error occurred');
+            console.error("Fetch error:", err);
+            setError(err.message || 'An error occurred while fetching dashboard data');
         } finally {
             setLoading(false);
         }
@@ -90,23 +82,13 @@ export default function AdminDashboardPage() {
         setRegisterSuccess('');
 
         // Validation
-        if (!formData.username || !formData.email || !formData.password) {
-            setRegisterError('All fields are required');
-            return;
-        }
-
-        if (formData.password.length < 6) {
-            setRegisterError('Password must be at least 6 characters');
-            return;
-        }
-
-        if (formData.password !== formData.confirmPassword) {
-            setRegisterError('Passwords do not match');
+        if (!candidateName || !email || !jobDescription || !resumeFile) {
+            setRegisterError('All fields (Name, Email, JD, Resume) are required');
             return;
         }
 
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(formData.email)) {
+        if (!emailRegex.test(email)) {
             setRegisterError('Please enter a valid email address');
             return;
         }
@@ -114,27 +96,33 @@ export default function AdminDashboardPage() {
         setRegisterLoading(true);
 
         try {
-            await authService.registerCandidateByAdmin({
-                username: formData.username,
-                email: formData.email,
-                password: formData.password
-            });
+            const formData = new FormData();
+            formData.append('candidate_name', candidateName);
+            formData.append('candidate_email', email);
+            formData.append('job_description', jobDescription);
+            formData.append('resume', resumeFile);
 
-            setRegisterSuccess(`Candidate "${formData.username}" registered successfully!`);
-            setFormData({ username: '', email: '', password: '', confirmPassword: '' });
+            await authService.registerCandidateWithResume(formData);
+
+            setRegisterSuccess(`Candidate "${candidateName}" registered successfully! Password sent via email.`);
+
+            // Reset form
+            setCandidateName('');
+            setEmail('');
+            setJobDescription('');
+            setResumeFile(null);
+
+            // Refresh list
+            fetchData();
 
             setTimeout(() => {
                 setShowRegisterModal(false);
                 setRegisterSuccess('');
-            }, 2000);
+            }, 3000);
         } catch (err: any) {
             let message = 'Registration failed. Please try again.';
             if (err.message) {
-                if (err.message.toLowerCase().includes('already')) {
-                    message = 'Username or email already exists';
-                } else {
-                    message = err.message;
-                }
+                message = err.message;
             }
             setRegisterError(message);
         } finally {
@@ -142,11 +130,28 @@ export default function AdminDashboardPage() {
         }
     };
 
+    const handleToggleLogin = async (candidateId: string) => {
+        if (!confirm("Are you sure you want to toggle login access for this candidate?")) return;
+
+        try {
+            const response = await dashboardService.toggleCandidateLogin(candidateId);
+            // Update local state
+            setCandidates(prev => prev.map(c =>
+                c.id === candidateId ? { ...c, login_disabled: response.login_disabled } : c
+            ));
+        } catch (err: any) {
+            alert(err.message || "Failed to toggle login status");
+        }
+    };
+
     const openRegisterModal = () => {
         setShowRegisterModal(true);
         setRegisterError('');
         setRegisterSuccess('');
-        setFormData({ username: '', email: '', password: '', confirmPassword: '' });
+        setCandidateName('');
+        setEmail('');
+        setJobDescription('');
+        setResumeFile(null);
     };
 
     if (loading && !user) {
@@ -176,7 +181,7 @@ export default function AdminDashboardPage() {
                                 className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 shadow-sm"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                                 </svg>
                                 Register Candidate
                             </button>
@@ -214,58 +219,64 @@ export default function AdminDashboardPage() {
                         <p className="text-3xl font-bold text-yellow-600">{stats?.pending || 0}</p>
                     </div>
                     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                        <h3 className="text-sm font-medium text-gray-600 mb-1">Flagged</h3>
-                        <p className="text-3xl font-bold text-red-600">{stats?.flagged || 0}</p>
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Registered Candidates</h3>
+                        <p className="text-3xl font-bold text-blue-600">{candidates.length}</p>
                     </div>
                 </div>
 
-                {/* Interviews Table */}
+                {/* Candidates Table */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200">
-                        <h2 className="text-lg font-semibold text-gray-900">Recent Interviews</h2>
+                    <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                        <h2 className="text-lg font-semibold text-gray-900">Registered Candidates</h2>
+                        <button onClick={fetchData} className="text-sm text-blue-600 hover:text-blue-800">Refresh List</button>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
                             <thead className="bg-gray-50">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Candidate</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Interview ID</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name / Username</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trust Score</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Login Access</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joined</th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {interviews.length === 0 ? (
+                                {candidates.length === 0 ? (
                                     <tr>
                                         <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
-                                            No interviews found.
+                                            No candidates found.
                                         </td>
                                     </tr>
                                 ) : (
-                                    interviews.map((interview) => (
-                                        <tr key={interview.interview_id} className="hover:bg-gray-50">
+                                    candidates.map((candidate) => (
+                                        <tr key={candidate.id} className="hover:bg-gray-50">
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                {interview.candidate_token}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
-                                                {interview.interview_id.substring(0, 8)}...
+                                                {candidate.username}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {new Date(interview.created_at).toLocaleDateString()}
+                                                {candidate.email}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <StatusBadge status={interview.state} />
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                                <span className={`font-semibold ${interview.cheat_score > 50 ? 'text-red-600' : 'text-green-600'}`}>
-                                                    {Math.max(0, 100 - interview.cheat_score)}%
+                                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${candidate.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                                    {candidate.is_active ? 'Active' : 'Inactive'}
                                                 </span>
                                             </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <span className={`px-2 py-1 text-xs font-semibold rounded-full ${!candidate.login_disabled ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
+                                                    {!candidate.login_disabled ? 'Enabled' : 'Disabled'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {new Date(candidate.created_at).toLocaleDateString()}
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                                                <button className="text-blue-600 hover:text-blue-800 font-medium">
-                                                    View Report
+                                                <button
+                                                    onClick={() => handleToggleLogin(candidate.id)}
+                                                    className={`font-medium mr-4 ${candidate.login_disabled ? 'text-green-600 hover:text-green-800' : 'text-orange-600 hover:text-orange-800'}`}
+                                                >
+                                                    {candidate.login_disabled ? 'Enable Login' : 'Disable Login'}
                                                 </button>
                                             </td>
                                         </tr>
@@ -280,7 +291,7 @@ export default function AdminDashboardPage() {
             {/* Registration Modal */}
             {showRegisterModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-lg w-full max-w-md p-6 shadow-xl">
+                    <div className="bg-white rounded-lg w-full max-w-md p-6 shadow-xl max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-6">
                             <h2 className="text-xl font-bold text-gray-900">Register New Candidate</h2>
                             <button
@@ -314,13 +325,13 @@ export default function AdminDashboardPage() {
 
                         <form onSubmit={handleRegisterCandidate} className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Candidate Name</label>
                                 <input
                                     type="text"
-                                    value={formData.username}
-                                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                    value={candidateName}
+                                    onChange={(e) => setCandidateName(e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="Enter username"
+                                    placeholder="Full Name"
                                     required
                                     disabled={registerLoading}
                                 />
@@ -330,8 +341,8 @@ export default function AdminDashboardPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                                 <input
                                     type="email"
-                                    value={formData.email}
-                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                     placeholder="Enter email address"
                                     required
@@ -340,29 +351,31 @@ export default function AdminDashboardPage() {
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                                <input
-                                    type="password"
-                                    value={formData.password}
-                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
+                                <textarea
+                                    value={jobDescription}
+                                    onChange={(e) => setJobDescription(e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="Minimum 6 characters"
+                                    placeholder="Paste Job Description here..."
+                                    rows={3}
                                     required
                                     disabled={registerLoading}
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Resume (PDF/Doc)</label>
                                 <input
-                                    type="password"
-                                    value={formData.confirmPassword}
-                                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="Confirm password"
+                                    type="file"
+                                    onChange={(e) => setResumeFile(e.target.files ? e.target.files[0] : null)}
+                                    className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                                    accept=".pdf,.doc,.docx"
                                     required
                                     disabled={registerLoading}
                                 />
+                                {resumeFile && (
+                                    <p className="mt-1 text-xs text-green-600">Selected: {resumeFile.name}</p>
+                                )}
                             </div>
 
                             <div className="flex gap-3 pt-4">
@@ -385,7 +398,7 @@ export default function AdminDashboardPage() {
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                             </svg>
-                                            Registering...
+                                            Processing...
                                         </>
                                     ) : (
                                         'Register Candidate'
@@ -400,14 +413,12 @@ export default function AdminDashboardPage() {
     );
 }
 
+// Helper badge component
 function StatusBadge({ status }: { status: string }) {
     let classes = "px-2.5 py-0.5 rounded-full text-xs font-semibold";
-
     if (status === 'COMPLETED') classes += " bg-green-100 text-green-800";
     else if (status === 'IN_PROGRESS') classes += " bg-blue-100 text-blue-800";
     else if (status === 'TERMINATED') classes += " bg-red-100 text-red-800";
-    else if (status === 'CREATED' || status === 'READY') classes += " bg-yellow-100 text-yellow-800";
     else classes += " bg-gray-100 text-gray-800";
-
     return <span className={classes}>{status}</span>;
 }

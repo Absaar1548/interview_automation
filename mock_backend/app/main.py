@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1 import auth_router
+from app.api.v1 import auth_router, dashboard_router
+
+
 
 from app.db.database import connect_to_mongo, close_mongo_connection
 
@@ -43,6 +45,7 @@ app.add_middleware(
 
 # Router inclusions
 app.include_router(auth_router.router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(dashboard_router.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 
 @app.get("/")
 async def root():

@@ -22,12 +22,33 @@ class ApiClient {
         }
     }
 
+    private getAuthToken(): string | null {
+        // We can access localStorage directly since this runs on client
+        if (typeof window !== 'undefined') {
+            try {
+                const storage = localStorage.getItem('auth-storage');
+                if (storage) {
+                    const parsed = JSON.parse(storage);
+                    return parsed.state?.token || null;
+                }
+            } catch (error) {
+                console.error("Failed to parse auth token from storage", error);
+            }
+        }
+        return null;
+    }
+
     async get<T>(path: string, requireInterviewId: boolean = false): Promise<T> {
         this.log(`REQUEST: GET ${path}`);
 
         const headers: Record<string, string> = {
             "Content-Type": "application/json",
         };
+
+        const token = this.getAuthToken();
+        if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+        }
 
         if (requireInterviewId) {
             if (!this.interviewId) {
@@ -45,15 +66,20 @@ class ApiClient {
         const response = await fetch(`${this.baseURL}${path}`, {
             method: "GET",
             headers,
-            credentials: "include",
         });
 
         const text = await response.text();
+        // ... rest is same
         const data = text ? JSON.parse(text) : null;
 
         this.log(`RESPONSE: GET ${path} - ${response.status}`);
 
         if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                // Optional: Trigger logout if we had a global store reference or event
+                // For now just throw, UI should handle redirect
+            }
+
             if (data && typeof data === "object" && "error_code" in data && "message" in data) {
                 this.log(`ERROR: GET ${path} - ${data.error_code}`);
                 throw data as ApiError;
@@ -70,12 +96,19 @@ class ApiClient {
         return data as T;
     }
 
-    async post<T, B>(path: string, body: B, requireInterviewId: boolean = false): Promise<T> {
+    async post<T, B>(path: string, body: B, requireInterviewId: boolean = false, isFormData: boolean = false): Promise<T> {
         this.log(`REQUEST: POST ${path}`);
 
-        const headers: Record<string, string> = {
-            "Content-Type": "application/json",
-        };
+        const headers: Record<string, string> = {};
+
+        if (!isFormData) {
+            headers["Content-Type"] = "application/json";
+        }
+
+        const token = this.getAuthToken();
+        if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+        }
 
         if (requireInterviewId) {
             if (!this.interviewId) {
@@ -93,8 +126,7 @@ class ApiClient {
         const response = await fetch(`${this.baseURL}${path}`, {
             method: "POST",
             headers,
-            body: JSON.stringify(body),
-            credentials: "include",
+            body: isFormData ? (body as any) : JSON.stringify(body),
         });
 
         const text = await response.text();

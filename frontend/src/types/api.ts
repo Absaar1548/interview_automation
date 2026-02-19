@@ -113,3 +113,20 @@ export interface CandidateRegistrationRequest {
     email: string;
     password: string;
 }
+
+export interface CandidateResponse {
+    id: string;
+    username: string;
+    email: string;
+    is_active: boolean;
+    login_disabled: boolean;
+    created_at: string;
+    job_description?: string;
+}
+
+export interface ToggleLoginResponse {
+    message: string;
+    candidate_id: string;
+    email: string;
+    login_disabled: boolean;
+}
