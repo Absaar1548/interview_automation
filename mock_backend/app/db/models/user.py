@@ -29,6 +29,7 @@ class UserBase(BaseModel):
     email: EmailStr  # Required, not optional
     role: Literal["admin", "candidate"]
     is_active: bool = True
+    login_disabled: bool = False
     profile: UserProfile  # Required, not optional
     
     @model_validator(mode='after')

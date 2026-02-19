@@ -5,4 +5,6 @@ python-multipart
 motor
 python-dotenv
 pydantic[email]
-passlib[bcrypt]
+passlib[argon2]
+python-jose[cryptography]
+argon2-cffi
