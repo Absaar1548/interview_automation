@@ -2,10 +2,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1 import auth_router, dashboard_router
 from app.api.v1 import interview_router
+from app.api.v1 import candidate_interview_router
+from app.api.v1 import session_router
 
 
 
-from app.db.database import connect_to_mongo, close_mongo_connection
+from app.db.database import connect_to_mongo, close_mongo_connection, get_database
+from app.db.seed import seed_interview_templates
 
 import logging
 
@@ -26,6 +29,8 @@ app = FastAPI(title="AI Interview Automation Mock Backend")
 @app.on_event("startup")
 async def startup_db_client():
     await connect_to_mongo()
+    db = get_database()
+    await seed_interview_templates(db)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
@@ -48,6 +53,8 @@ app.add_middleware(
 app.include_router(auth_router.router, prefix="/api/v1/auth", tags=["Auth"])
 app.include_router(dashboard_router.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(interview_router.router, prefix="/api/v1/admin/interviews", tags=["Interviews"])
+app.include_router(candidate_interview_router.router, prefix="/api/v1/candidate/interviews", tags=["Candidate Interviews"])
+app.include_router(session_router.router, prefix="/api/v1", tags=["Session"])
 
 @app.get("/")
 async def root():

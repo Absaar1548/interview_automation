@@ -8,6 +8,8 @@ PUT    /admin/interviews/{id}/cancel       – Cancel a non-completed interview
 
 from fastapi import APIRouter, Depends, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from typing import List
+from bson import ObjectId as BSONObjectId
 
 from app.api.v1.auth_router import get_current_admin
 from app.db.database import get_database
@@ -20,9 +22,61 @@ from app.schemas.interview import (
     CancelInterviewRequest,
     CancelInterviewResponse,
 )
+from app.db.repositories.interview_repository import InterviewRepository
 from app.services.interview_service import InterviewService
 
 router = APIRouter()
+
+
+def _serialize_doc(doc: dict) -> dict:
+    """Recursively convert all ObjectId values in a MongoDB doc to strings."""
+    result = {}
+    for key, value in doc.items():
+        if isinstance(value, BSONObjectId):
+            result[key] = str(value)
+        elif isinstance(value, dict):
+            result[key] = _serialize_doc(value)
+        elif isinstance(value, list):
+            result[key] = [
+                _serialize_doc(v) if isinstance(v, dict) else (str(v) if isinstance(v, BSONObjectId) else v)
+                for v in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
+@router.get(
+    "/templates",
+    summary="List active interview templates",
+    description="Admin-only. Returns all interview templates with is_active=True.",
+)
+async def list_templates(
+    current_admin: UserInDB = Depends(get_current_admin),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    cursor = db["interview_templates"].find({"is_active": True})
+    templates = []
+    async for doc in cursor:
+        doc["id"] = str(doc.pop("_id"))
+        templates.append(_serialize_doc(doc))
+    return templates
+
+
+@router.get(
+    "/summary",
+    summary="Get a lightweight summary of all interviews",
+    description=(
+        "Admin-only. Returns candidate_id, interview_id, status, and scheduled_at "
+        "for every interview. Excludes curated_questions for performance."
+    ),
+)
+async def get_interview_summary(
+    current_admin: UserInDB = Depends(get_current_admin),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+):
+    repo = InterviewRepository(db)
+    return await repo.get_all_summary()
 
 
 @router.post(

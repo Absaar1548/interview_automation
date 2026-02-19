@@ -6,7 +6,7 @@ rescheduling, and cancellation. Delegates DB calls to InterviewRepository
 and UserRepository. Questino curation is delegated to mock_question_curator.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -223,13 +223,14 @@ class InterviewService:
 
     @staticmethod
     def _assert_future_datetime(dt: datetime) -> None:
-        """Raise 400 if dt is not strictly in the future (UTC)."""
-        # Make both offset-naive for comparison
+        """Raise 400 if dt is more than 10 minutes in the past (UTC).
+        A 10-minute grace window lets admins schedule 'now' without clock skew issues.
+        """
         now_utc = datetime.utcnow()
-        # If dt is timezone-aware, convert to naive UTC for comparison
         dt_naive = dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
-        if dt_naive <= now_utc:
+        grace = timedelta(minutes=10)
+        if dt_naive < now_utc - grace:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="scheduled_at must be a future datetime (UTC)",
+                detail="scheduled_at must not be more than 10 minutes in the past (UTC)",
             )

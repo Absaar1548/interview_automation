@@ -26,6 +26,15 @@ body {
   min-height: 100vh;
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@utility animate-fadeIn {
+  animation: fadeIn 0.2s ease-out both;
+}
+
 @utility glass-card {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);

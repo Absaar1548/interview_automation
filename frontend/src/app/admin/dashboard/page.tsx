@@ -3,9 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import axios from 'axios'
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
 
 export default function AdminDashboard() {
   const router = useRouter()
@@ -37,7 +35,7 @@ export default function AdminDashboard() {
     if (storedUserData) {
       setUserData(JSON.parse(storedUserData))
     }
-    
+
     // Fetch candidates on mount
     fetchCandidates()
   }, [router])
@@ -48,15 +46,10 @@ export default function AdminDashboard() {
 
     setLoadingCandidates(true)
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/api/v1/auth/admin/candidates`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      )
-      setCandidates(response.data)
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/admin/candidates`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) setCandidates(await res.json())
     } catch (err: any) {
       console.error('Failed to fetch candidates:', err)
     } finally {
@@ -69,27 +62,18 @@ export default function AdminDashboard() {
     if (!token) return
 
     try {
-      const response = await axios.post(
+      const res = await fetch(
         `${API_BASE_URL}/api/v1/auth/admin/candidates/${candidateId}/toggle-login`,
-        {},
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
+        { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: '{}' }
       )
-      
-      // Update the candidate in the list
-      setCandidates(candidates.map(c => 
-        c.id === candidateId 
-          ? { ...c, login_disabled: response.data.login_disabled }
-          : c
+      const data = await res.json()
+      setCandidates(candidates.map(c =>
+        c.id === candidateId ? { ...c, login_disabled: data.login_disabled } : c
       ))
-      
-      setSuccess(response.data.message)
+      setSuccess(data.message || 'Login status updated.')
       setTimeout(() => setSuccess(''), 3000)
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to toggle login status')
+      setError('Failed to toggle login status')
       setTimeout(() => setError(''), 3000)
     }
   }
@@ -129,19 +113,18 @@ export default function AdminDashboard() {
         formDataToSend.append('resume', resume)
       }
 
-      const response = await axios.post(
-        `${API_BASE_URL}/api/v1/auth/admin/register-candidate`,
-        formDataToSend,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        }
-      )
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/admin/register-candidate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formDataToSend,
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.detail || `Error ${res.status}`)
+      }
 
       setSuccess(`Candidate ${formData.candidate_name} has been successfully registered! Credentials (email and password) have been sent to ${formData.candidate_email}`)
-      
+
       // Reset form
       setFormData({
         candidate_name: '',
@@ -149,11 +132,11 @@ export default function AdminDashboard() {
         job_description: ''
       })
       setResume(null)
-      
+
       // Reset file input
       const fileInput = document.getElementById('resume') as HTMLInputElement
       if (fileInput) fileInput.value = ''
-      
+
       // Refresh candidates list
       fetchCandidates()
     } catch (err: any) {
@@ -227,11 +210,10 @@ export default function AdminDashboard() {
             <nav className="-mb-px flex space-x-8">
               <button
                 onClick={() => setActiveTab('register')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'register'
-                    ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'register'
+                  ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                  }`}
               >
                 Register Candidate
               </button>
@@ -240,11 +222,10 @@ export default function AdminDashboard() {
                   setActiveTab('candidates')
                   fetchCandidates()
                 }}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'candidates'
-                    ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
+                className={`py-4 px-1 border-b-2 font-medium text-sm ${activeTab === 'candidates'
+                  ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                  }`}
               >
                 Manage Candidates
               </button>
@@ -258,99 +239,99 @@ export default function AdminDashboard() {
             <div className="mb-8">
               <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Register New Candidate</h2>
               <p className="text-gray-600 dark:text-gray-300">
-                Fill in the candidate details, job description, and upload their resume. 
+                Fill in the candidate details, job description, and upload their resume.
                 Credentials (email and password) will be automatically generated and sent to the candidate's email.
               </p>
             </div>
 
-          {/* Registration Form */}
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="candidate_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Candidate Name *
-              </label>
-              <input
-                id="candidate_name"
-                name="candidate_name"
-                type="text"
-                value={formData.candidate_name}
-                onChange={handleInputChange}
-                required
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition"
-                placeholder="John Doe"
-              />
-            </div>
+            {/* Registration Form */}
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div>
+                <label htmlFor="candidate_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Candidate Name *
+                </label>
+                <input
+                  id="candidate_name"
+                  name="candidate_name"
+                  type="text"
+                  value={formData.candidate_name}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition"
+                  placeholder="John Doe"
+                />
+              </div>
 
-            <div>
-              <label htmlFor="candidate_email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Candidate Email *
-              </label>
-              <input
-                id="candidate_email"
-                name="candidate_email"
-                type="email"
-                value={formData.candidate_email}
-                onChange={handleInputChange}
-                required
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition"
-                placeholder="candidate@example.com"
-              />
-            </div>
+              <div>
+                <label htmlFor="candidate_email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Candidate Email *
+                </label>
+                <input
+                  id="candidate_email"
+                  name="candidate_email"
+                  type="email"
+                  value={formData.candidate_email}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition"
+                  placeholder="candidate@example.com"
+                />
+              </div>
 
-            <div>
-              <label htmlFor="job_description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Job Description *
-              </label>
-              <textarea
-                id="job_description"
-                name="job_description"
-                value={formData.job_description}
-                onChange={handleInputChange}
-                required
-                rows={8}
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition resize-none"
-                placeholder="Enter the job description, requirements, and responsibilities..."
-              />
-            </div>
+              <div>
+                <label htmlFor="job_description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Job Description *
+                </label>
+                <textarea
+                  id="job_description"
+                  name="job_description"
+                  value={formData.job_description}
+                  onChange={handleInputChange}
+                  required
+                  rows={8}
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition resize-none"
+                  placeholder="Enter the job description, requirements, and responsibilities..."
+                />
+              </div>
 
-            <div>
-              <label htmlFor="resume" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Resume (PDF/DOC/DOCX) *
-              </label>
-              <input
-                id="resume"
-                name="resume"
-                type="file"
-                onChange={handleFileChange}
-                required
-                accept=".pdf,.doc,.docx"
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900 dark:file:text-indigo-300"
-              />
-              {resume && (
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                  Selected: {resume.name}
-                </p>
-              )}
-            </div>
+              <div>
+                <label htmlFor="resume" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Resume (PDF/DOC/DOCX) *
+                </label>
+                <input
+                  id="resume"
+                  name="resume"
+                  type="file"
+                  onChange={handleFileChange}
+                  required
+                  accept=".pdf,.doc,.docx"
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent dark:bg-gray-700 dark:text-white outline-none transition file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-900 dark:file:text-indigo-300"
+                />
+                {resume && (
+                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                    Selected: {resume.name}
+                  </p>
+                )}
+              </div>
 
-            <div className="pt-4">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
-              >
-                {loading ? 'Registering Candidate...' : 'Register Candidate'}
-              </button>
-            </div>
-          </form>
+              <div className="pt-4">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+                >
+                  {loading ? 'Registering Candidate...' : 'Register Candidate'}
+                </button>
+              </div>
+            </form>
 
-          {/* Info Box */}
-          <div className="mt-8 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-            <p className="text-sm text-blue-800 dark:text-blue-300">
-              <strong>Note:</strong> Upon successful registration, credentials (email and password) will be automatically sent to the candidate's email address. 
-              The candidate can use these credentials to log in to the platform.
-            </p>
-          </div>
+            {/* Info Box */}
+            <div className="mt-8 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <p className="text-sm text-blue-800 dark:text-blue-300">
+                <strong>Note:</strong> Upon successful registration, credentials (email and password) will be automatically sent to the candidate's email address.
+                The candidate can use these credentials to log in to the platform.
+              </p>
+            </div>
           </div>
         )}
 
@@ -405,11 +386,10 @@ export default function AdminDashboard() {
                           {candidate.username}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            candidate.login_disabled
-                              ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                              : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                          }`}>
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${candidate.login_disabled
+                            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                            : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                            }`}>
                             {candidate.login_disabled ? 'Login Disabled' : 'Login Enabled'}
                           </span>
                         </td>
@@ -419,11 +399,10 @@ export default function AdminDashboard() {
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <button
                             onClick={() => toggleCandidateLogin(candidate.id)}
-                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                              candidate.login_disabled
-                                ? 'bg-green-600 hover:bg-green-700 text-white'
-                                : 'bg-red-600 hover:bg-red-700 text-white'
-                            }`}
+                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${candidate.login_disabled
+                              ? 'bg-green-600 hover:bg-green-700 text-white'
+                              : 'bg-red-600 hover:bg-red-700 text-white'
+                              }`}
                           >
                             {candidate.login_disabled ? 'Enable Login' : 'Disable Login'}
                           </button>
