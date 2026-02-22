@@ -11,8 +11,6 @@ from api.v1.endpoints import (
     custom_question_router,
     zwayam_router,
     answer_router,
-    zwayam_router,
-    answer_router,
     dev_router,
     auth_router,
     dashboard_router
