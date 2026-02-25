@@ -30,6 +30,11 @@ integrated with Zwayam.
 - English only
 - Azure-first deployment
 
+
+## Development Environment
+- **Mock Backend**: Located in `mock_backend/`. Use this for development until full backend integration.
+- **Frontend**: Located in `frontend/`. Connects to `localhost:8000`.
+
 All generated code must:
 - Be production-grade
 - Follow the defined folder responsibilities
