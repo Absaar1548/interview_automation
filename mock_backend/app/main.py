@@ -5,6 +5,8 @@ from app.api.v1 import interview_router
 from app.api.v1 import candidate_interview_router
 from app.api.v1 import session_router
 
+from contextlib import asynccontextmanager
+from app.db.sql.session import test_database_connection
 import logging
 
 # Configure logging
@@ -14,7 +16,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="AI Interview Automation Mock Backend")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup Events
+    logger.info("Initializing application and checking database connection...")
+    await test_database_connection()
+    yield
+    # Shutdown events would go here
+    logger.info("Application shutting down.")
+
+app = FastAPI(title="AI Interview Automation Mock Backend", lifespan=lifespan)
 
 # CORS Middleware
 origins = [

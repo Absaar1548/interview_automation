@@ -8,7 +8,7 @@ import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.schemas.auth import TokenResponse, LoginRequest, CandidateResponse
+from app.schemas.auth import TokenResponse, LoginRequest, CandidateResponse, AdminRegistrationRequest, AdminResponse
 from app.db.sql.session import get_db_session
 from app.db.sql.unit_of_work import UnitOfWork
 from app.db.sql.models.user import User, CandidateProfile, AdminProfile
@@ -16,6 +16,7 @@ from app.db.sql.enums import UserRole
 from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.config import settings
 from app.services.email_service import email_service
+from app.services.admin_auth_service import AdminAuthSQLService
 
 router = APIRouter()
 
@@ -70,6 +71,22 @@ async def get_current_admin(current_user: User = Depends(get_current_active_user
 async def register_candidate(user_data: dict, session: AsyncSession = Depends(get_db_session)):
     """Warning: mock route. Uses direct dictionary rather than Pydantic struct to bypass typing logic conflicts temporarily during migration."""
     raise HTTPException(status_code=501, detail="Direct unauthenticated registration is intentionally disabled. Admins must provision candidates natively.")
+
+@router.post("/register/admin", response_model=AdminResponse, status_code=status.HTTP_201_CREATED)
+async def register_admin(request: AdminRegistrationRequest, session: AsyncSession = Depends(get_db_session)):
+    """
+    Register a new administrator into the platform securely via SQL repositories.
+    """
+    user = await AdminAuthSQLService.register_admin(session=session, request=request)
+    
+    return AdminResponse(
+        id=str(user.id),
+        username=user.username,
+        email=user.email,
+        is_active=user.is_active,
+        role=user.role.value,
+        created_at=user.created_at
+    )
 
 @router.post("/login/admin", response_model=TokenResponse)
 async def login_admin(request: LoginRequest, session: AsyncSession = Depends(get_db_session)):

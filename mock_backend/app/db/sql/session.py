@@ -29,3 +29,17 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+async def test_database_connection():
+    """
+    Test the connection to the database. Exits the app if connection fails.
+    """
+    import sys
+    from sqlalchemy import text
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("Successfully established connection to the database.")
+    except Exception as e:
+        logger.critical(f"Failed to connect to the database: {e}")
+        sys.exit(1)
