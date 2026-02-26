@@ -6,7 +6,8 @@ from app.api.v1 import candidate_interview_router
 from app.api.v1 import session_router
 
 from contextlib import asynccontextmanager
-from app.db.sql.session import test_database_connection
+from app.db.sql.session import AsyncSessionLocal, test_database_connection
+from app.services.template_seed_service import ensure_default_template_exists
 import logging
 
 # Configure logging
@@ -18,11 +19,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup Events
+    # ── Step 1: Verify database connectivity ──────────────────────────────────
     logger.info("Initializing application and checking database connection...")
     await test_database_connection()
+
+    # ── Step 2: Seed default template if none exist ───────────────────────────
+    logger.info("Running template seed check...")
+    try:
+        async with AsyncSessionLocal() as session:
+            await ensure_default_template_exists(session)
+    except Exception as e:
+        logger.error("[template_seed] Seed failed (non-fatal): %s", e)
+
     yield
-    # Shutdown events would go here
+    # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Application shutting down.")
 
 app = FastAPI(title="AI Interview Automation Mock Backend", lifespan=lifespan)

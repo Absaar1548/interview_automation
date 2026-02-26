@@ -130,12 +130,10 @@ class InterviewAdminSQLService:
         return [
             {
                 "id": str(t.id),
-                "title": t.title,
+                "name": t.title,                                               # title → name (frontend contract)
                 "description": t.description,
+                "total_duration_sec": (t.settings or {}).get("total_duration_sec", 3600),
                 "is_active": t.is_active,
-                "created_at": t.created_at,
-                "updated_at": t.updated_at,
-                "settings": t.settings,
             }
             for t in templates
         ]
