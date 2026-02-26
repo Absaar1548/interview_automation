@@ -1,5 +1,5 @@
 """
-session_router.py
+session_router.py (Refactored for SQLAlchemy)
 =================
 Endpoints used by the interview shell (InterviewShell, InterviewService, ControlWebSocket).
 
@@ -19,16 +19,17 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+import uuid
 from typing import Optional
 
-from bson import ObjectId
 from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_router import get_current_active_user
-from app.db.database import get_database
-from app.db.models.user import UserInDB
+from app.db.sql.session import get_db_session, AsyncSessionLocal
+from app.db.sql.models.user import User
+from app.db.sql.enums import UserRole
+from app.services.interview_session_sql_service import InterviewSessionSQLService
 
 logger = logging.getLogger(__name__)
 
@@ -37,56 +38,30 @@ router = APIRouter()
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _get_session_and_interview(
-    session_id: str,
-    db: AsyncIOMotorDatabase,
-) -> tuple[dict, dict]:
-    """
-    Validate session_id and return (session_doc, interview_doc).
-    Raises 404 / 400 on failure.
-    """
-    try:
-        oid = ObjectId(session_id)
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail=f"Invalid session_id: {session_id}")
-
-    sessions = db.get_collection("interview_sessions")
-    session = await sessions.find_one({"_id": oid, "status": "active"})
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Session not found or not active")
-
-    interviews = db.get_collection("interviews")
-    interview_oid = ObjectId(session["interview_id"])
-    interview = await interviews.find_one({"_id": interview_oid})
-    if not interview:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Interview not found")
-
-    return session, interview
-
-
 async def _get_current_candidate(
-    current_user: UserInDB = Depends(get_current_active_user),
-) -> UserInDB:
-    if current_user.role != "candidate":
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    if current_user.role != UserRole.CANDIDATE:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Only candidates can access this endpoint")
     return current_user
+
+def validate_uuid(id_str: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(id_str)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid UUID: {id_str}",
+        )
 
 
 # ─── WebSocket proctoring/control channel ─────────────────────────────────────
 
 @router.websocket("/proctoring/ws")
-async def proctoring_ws(websocket: WebSocket, db: AsyncIOMotorDatabase = Depends(get_database)):
+async def proctoring_ws(websocket: WebSocket):
     """
     Simple proctoring / control WebSocket.
-    Protocol:
-      Client → HANDSHAKE {type, interview_id, candidate_token}
-      Server → HANDSHAKE_ACK {type, heartbeat_interval_sec}
-      Client → HEARTBEAT {type}
-      Server → HEARTBEAT_ACK {type}
     """
     await websocket.accept()
     session_validated = False
@@ -103,15 +78,17 @@ async def proctoring_ws(websocket: WebSocket, db: AsyncIOMotorDatabase = Depends
             msg_type = msg.get("type", "")
 
             if msg_type == "HANDSHAKE":
-                session_id = msg.get("interview_id", "")
-                # Validate session exists
+                session_id_str = msg.get("interview_id", "")
+                
                 try:
-                    oid = ObjectId(session_id)
-                    sessions = db.get_collection("interview_sessions")
-                    session = await sessions.find_one({"_id": oid, "status": "active"})
-                    if session:
-                        session_validated = True
-                except Exception:
+                    session_id = uuid.UUID(session_id_str)
+                    
+                    # Manual short-lived transaction for WebSocket
+                    async with AsyncSessionLocal() as session:
+                        await InterviewSessionSQLService.validate_session(session, session_id)
+                        
+                    session_validated = True
+                except (ValueError, HTTPException):
                     session_validated = False
 
                 if session_validated:
@@ -138,14 +115,9 @@ async def proctoring_ws(websocket: WebSocket, db: AsyncIOMotorDatabase = Depends
 
 @router.websocket("/proctoring/media/ws")
 async def proctoring_media_ws(websocket: WebSocket):
-    """
-    Mock media streaming WebSocket.
-    Accepts binary data and discards it.
-    """
     await websocket.accept()
     try:
         while True:
-            # Just drain the socket
             await websocket.receive_bytes()
     except WebSocketDisconnect:
         pass
@@ -154,55 +126,29 @@ async def proctoring_media_ws(websocket: WebSocket):
 
 
 @router.websocket("/answer/ws")
-async def answer_ws(websocket: WebSocket, db: AsyncIOMotorDatabase = Depends(get_database)):
-    """
-    Mock answer transcription WebSocket.
-    Handles START_ANSWER, accepts binary audio, sends mock TRANSCRIPT_* messages,
-    and finishes with ANSWER_READY.
-    """
+async def answer_ws(websocket: WebSocket):
     await websocket.accept()
-    transcript_id = str(ObjectId())
+    transcript_id = str(uuid.uuid4())
     
     try:
         while True:
-            # Receive text (JSON) or binary
             message = await websocket.receive()
-            
             if "text" in message:
                 try:
                     data = json.loads(message["text"])
-                    msg_type = data.get("type")
-
-                    if msg_type == "START_ANSWER":
-                        # Acknowledge or just get ready
-                        pass
-                        
-                    elif msg_type == "END_ANSWER":
-                        # Send mock final transcript
+                    if data.get("type") == "END_ANSWER":
                         await websocket.send_text(json.dumps({
                             "type": "TRANSCRIPT_FINAL", 
                             "text": "This is a mock transcript of the candidate's answer."
                         }))
-                        
-                        # Send answer ready signal
                         await websocket.send_text(json.dumps({
                             "type": "ANSWER_READY", 
                             "transcript_id": transcript_id
                         }))
-                        
-                        # Close after successful flow
                         await websocket.close()
                         return
-
                 except json.JSONDecodeError:
                     pass
-
-            elif "bytes" in message:
-                # Received audio chunk - simulate partial transcript occasionally
-                # For now, we can just ignore it or send a partial update
-                # await websocket.send_text(json.dumps({"type": "TRANSCRIPT_PARTIAL", "text": "Listening..."}))
-                pass
-
     except WebSocketDisconnect:
         pass
     except Exception as exc:
@@ -214,31 +160,17 @@ async def answer_ws(websocket: WebSocket, db: AsyncIOMotorDatabase = Depends(get
 @router.post("/session/start")
 async def session_start(
     x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
-    current_user: UserInDB = Depends(_get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    """
-    Mark the session as fully active and return {state: "IN_PROGRESS"}.
-    The session_id comes via the X-Interview-Id header (set by apiClient).
-    """
     if not x_interview_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="X-Interview-Id header is required")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
 
-    session, interview = await _get_session_and_interview(x_interview_id, db)
-
-    # Ensure interview belongs to this candidate
-    if interview.get("candidate_id") != str(current_user.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Session does not belong to you")
-
-    # Initialise question tracking if not already present
-    sessions = db.get_collection("interview_sessions")
-    if "answered_count" not in session:
-        await sessions.update_one(
-            {"_id": session["_id"]},
-            {"$set": {"answered_count": 0}},
-        )
+    session_id = validate_uuid(x_interview_id)
+    candidate_id = current_user.id
+    
+    # Ensures the session exists and belongs to the candidate
+    await InterviewSessionSQLService.validate_session(session, session_id, candidate_id)
 
     return {"state": "IN_PROGRESS"}
 
@@ -246,110 +178,50 @@ async def session_start(
 @router.get("/question/next")
 async def question_next(
     x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
-    current_user: UserInDB = Depends(_get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    """
-    Return the next unanswered curated question for this session.
-    Questions are served in order based on answered_count stored on the session.
-    """
     if not x_interview_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="X-Interview-Id header is required")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
 
-    session, interview = await _get_session_and_interview(x_interview_id, db)
+    session_id = validate_uuid(x_interview_id)
+    candidate_id = current_user.id
 
-    if interview.get("candidate_id") != str(current_user.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Session does not belong to you")
-
-    curated = interview.get("curated_questions", {})
-    questions: list = curated.get("questions", []) if isinstance(curated, dict) else []
-    answered_count: int = session.get("answered_count", 0)
-
-    if answered_count >= len(questions):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="No more questions")
-
-    q = questions[answered_count]
-    # Map to the shape QuestionResponse expects on the frontend
-    answer_mode = "TEXT"
-    if q.get("question_type") == "coding":
-        answer_mode = "CODE"
-    elif q.get("question_type") == "conversational":
-        answer_mode = "AUDIO"
-
-    return {
-        "question_id": q.get("question_id", f"q_{answered_count}"),
-        "question_text": q.get("prompt", ""),
-        "answer_mode": answer_mode,
-        "time_limit_sec": q.get("time_limit_sec", 120),
-        "question_number": answered_count + 1,
-        "total_questions": len(questions),
-    }
+    return await InterviewSessionSQLService.get_session_state(session, session_id, candidate_id)
 
 
 @router.post("/submit/submit")
 async def submit_answer(
     payload: dict,
     x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
-    current_user: UserInDB = Depends(_get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    """
-    Record the answer and advance the question counter.
-    Returns {state: "IN_PROGRESS"} if more questions remain, {state: "COMPLETED"} otherwise.
-    """
     if not x_interview_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="X-Interview-Id header is required")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
 
-    session, interview = await _get_session_and_interview(x_interview_id, db)
+    session_id = validate_uuid(x_interview_id)
+    candidate_id = current_user.id
 
-    if interview.get("candidate_id") != str(current_user.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Session does not belong to you")
-
-    curated = interview.get("curated_questions", {})
-    questions: list = curated.get("questions", []) if isinstance(curated, dict) else []
-    answered_count: int = session.get("answered_count", 0)
-
-    new_count = answered_count + 1
-
-    sessions = db.get_collection("interview_sessions")
-    interviews = db.get_collection("interviews")
-    now = datetime.utcnow()
-
-    if new_count >= len(questions):
-        # All questions answered → complete
-        await sessions.update_one(
-            {"_id": session["_id"]},
-            {"$set": {"answered_count": new_count, "status": "completed", "completed_at": now}},
-        )
-        await interviews.update_one(
-            {"_id": interview["_id"]},
-            {"$set": {"status": "completed", "completed_at": now, "updated_at": now}},
-        )
-        return {"state": "COMPLETED"}
-    else:
-        await sessions.update_one(
-            {"_id": session["_id"]},
-            {"$set": {"answered_count": new_count}},
-        )
-        return {"state": "IN_PROGRESS"}
+    return await InterviewSessionSQLService.submit_answer(session, session_id, candidate_id, payload)
 
 
 @router.post("/proctoring/event")
 async def proctoring_event(
     payload: dict,
     x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
-    current_user: UserInDB = Depends(_get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    """Acknowledge a proctoring event. For now just logs and acks."""
+    if not x_interview_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
+        
+    session_id = validate_uuid(x_interview_id)
+    await InterviewSessionSQLService.validate_session(session, session_id, current_user.id)
+    
     logger.info(
         "[proctoring_event] session=%s user=%s event=%s",
-        x_interview_id,
+        session_id,
         str(current_user.id),
         payload.get("event_type"),
     )

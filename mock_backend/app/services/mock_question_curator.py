@@ -24,9 +24,9 @@ def generate_curated_questions(
     Returns a mock curated questions payload for the given template and candidate.
 
     Args:
-        template_id: ObjectId string of the interview template.
-        candidate_id: ObjectId string of the candidate.
-        resume_id: ObjectId string of the candidate's resume (optional).
+        template_id: UUID string of the interview template.
+        candidate_id: UUID string of the candidate.
+        resume_id: UUID string of the candidate's resume (optional).
         jd_id: Job description identifier (defaults to mock).
 
     Returns:
