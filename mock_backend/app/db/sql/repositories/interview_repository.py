@@ -49,14 +49,21 @@ class InterviewRepository(BaseRepository[Interview]):
         return result.scalars().first()
 
     async def get_all_summary(self) -> List[dict]:
-        stmt = select(Interview.id, Interview.candidate_id, Interview.status, Interview.scheduled_at)
+        stmt = select(
+            Interview.id,
+            Interview.candidate_id,
+            Interview.status,
+            Interview.scheduled_at,
+            Interview.overall_score,
+        )
         result = await self.session.execute(stmt)
         return [
             {
                 "interview_id": row.id,
                 "candidate_id": row.candidate_id,
                 "status": row.status,
-                "scheduled_at": row.scheduled_at
+                "scheduled_at": row.scheduled_at,
+                "overall_score": row.overall_score,
             }
             for row in result.all()
         ]

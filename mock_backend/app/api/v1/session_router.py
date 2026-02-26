@@ -206,6 +206,23 @@ async def submit_answer(
     return await InterviewSessionSQLService.submit_answer(session, session_id, candidate_id, payload)
 
 
+@router.get("/session/summary")
+async def get_session_summary(
+    x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Returns mock evaluation summary for the completed interview session.
+    Requires X-Interview-Id: <session_id> header.
+    """
+    if not x_interview_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
+
+    session_id = validate_uuid(x_interview_id)
+    return await InterviewSessionSQLService.get_summary(session, session_id, current_user.id)
+
+
 @router.post("/proctoring/event")
 async def proctoring_event(
     payload: dict,

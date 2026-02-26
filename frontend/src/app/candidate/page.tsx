@@ -30,7 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function CandidatePage() {
     const router = useRouter();
-    const { user, isAuthenticated, logout } = useAuthStore();
+    const { user, isAuthenticated, logout, _hasHydrated } = useAuthStore();
     const initializeInterview = useInterviewStore((s) => s.initialize);
 
     const [interview, setInterview] = useState<ActiveInterviewResponse | null>(null);
@@ -69,6 +69,7 @@ export default function CandidatePage() {
     }, [logout, router]);
 
     useEffect(() => {
+        if (!_hasHydrated) return;  // wait for localStorage rehydration
         if (!isAuthenticated || !user) {
             router.push('/login/candidate');
             return;
@@ -78,7 +79,7 @@ export default function CandidatePage() {
             return;
         }
         fetchData();
-    }, [isAuthenticated, user, router, fetchData]);
+    }, [_hasHydrated, isAuthenticated, user, router, fetchData]);
 
     // ─── Start / Rejoin interview ────────────────────────────────────────────
     const handleStart = async () => {

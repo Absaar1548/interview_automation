@@ -14,7 +14,10 @@ interface AuthState {
     isAuthenticated: boolean;
     isLoading: boolean;
     error: string | null;
+    // true once Zustand has finished rehydrating from localStorage
+    _hasHydrated: boolean;
 
+    setHasHydrated: (value: boolean) => void;
     login: (credentials: AuthRequest, type: 'admin' | 'candidate') => Promise<void>;
     logout: () => void;
 }
@@ -27,6 +30,9 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: false,
             isLoading: false,
             error: null,
+            _hasHydrated: false,
+
+            setHasHydrated: (value) => set({ _hasHydrated: value }),
 
             login: async (credentials, type) => {
                 set({ isLoading: true, error: null });
@@ -44,7 +50,6 @@ export const useAuthStore = create<AuthState>()(
                 } catch (error: any) {
                     let message = "Login failed. Please try again.";
 
-                    // Handle specific error cases
                     if (error.message) {
                         const errorMsg = error.message.toLowerCase();
                         if (errorMsg.includes("incorrect") || errorMsg.includes("credentials")) {
@@ -70,7 +75,15 @@ export const useAuthStore = create<AuthState>()(
         }),
         {
             name: "auth-storage",
-            partialize: (state) => ({ user: state.user, token: state.token, isAuthenticated: state.isAuthenticated }),
+            partialize: (state) => ({
+                user: state.user,
+                token: state.token,
+                isAuthenticated: state.isAuthenticated,
+            }),
+            // Called when rehydration from localStorage is complete
+            onRehydrateStorage: () => (state) => {
+                state?.setHasHydrated(true);
+            },
         }
     )
 );

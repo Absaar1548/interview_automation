@@ -67,6 +67,7 @@ async def get_interview_summary(
             "candidate_id": str(s["candidate_id"]) if s["candidate_id"] else None,
             "status": s["status"].value if isinstance(s["status"], InterviewStatus) else s["status"],
             "scheduled_at": s["scheduled_at"],
+            "overall_score": s.get("overall_score"),
         }
         for s in summary
     ]
