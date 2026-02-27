@@ -7,8 +7,9 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-DB_NAME = os.getenv("DB_NAME", "interview_automation")
+# Support both DATABASE_URL/MONGODB_URL and DATABASE_NAME/DB_NAME for .env compatibility
+MONGODB_URL = os.getenv("DATABASE_URL") or os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+DB_NAME = os.getenv("DATABASE_NAME") or os.getenv("DB_NAME", "interview_automation")
 
 class Database:
     client: AsyncIOMotorClient = None
