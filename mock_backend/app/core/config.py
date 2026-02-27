@@ -16,5 +16,5 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # or gpt-4, etc.
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
+ 
 settings = Settings()
