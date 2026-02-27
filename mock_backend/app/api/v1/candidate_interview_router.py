@@ -4,10 +4,12 @@ Candidate Interview Router
 Endpoints for candidates to view and start their assigned interviews.
 
 GET  /active               – Returns scheduled/in_progress interview for the logged-in candidate
-POST /{interview_id}/start – Creates or resumes an interview session
+POST /{interview_id}/start – Creates or resumes an interview session (generates questions from resume+JD via LLM when starting).
 """
 
-from datetime import datetime
+import asyncio
+import logging
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -16,7 +18,10 @@ from app.api.v1.auth_router import get_current_active_user
 from app.db.database import get_database
 from app.db.models.user import UserInDB
 from app.db.repositories.interview_repository import InterviewRepository
+from app.services.llm_question_service import generate_conversation_questions
 
+logger = logging.getLogger(__name__)
+CANDIDATE_MATERIALS_COLLECTION = "candidate_materials"
 router = APIRouter()
 
 
@@ -54,6 +59,16 @@ async def get_active_interview(
     interview = await repo.get_active_or_inprogress_for_candidate(candidate_id)
     if not interview:
         return None
+
+    # Interview vanishes 72 hours after scheduled time
+    scheduled_at: datetime = interview.get("scheduled_at")
+    if scheduled_at:
+        now_utc = datetime.utcnow()
+        sa_naive = scheduled_at.replace(tzinfo=None) if scheduled_at.tzinfo else scheduled_at
+        expiry_utc = sa_naive + timedelta(hours=72)
+        if now_utc > expiry_utc:
+            await repo.mark_expired(str(interview["_id"]))
+            return None
 
     interview_id = str(interview["_id"])
     interview_status = interview.get("status")
@@ -165,6 +180,28 @@ async def start_interview(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Interview cannot be started before the scheduled time",
             )
+
+    # Generate conversation questions from resume + JD via LLM (live when interview starts)
+    materials_coll = db[CANDIDATE_MATERIALS_COLLECTION]
+    materials = await materials_coll.find_one({"candidate_id": candidate_id})
+    resume_text = (materials or {}).get("resume_text") or ""
+    jd_text = (materials or {}).get("jd_text") or ""
+    template_id = str(interview.get("template_id") or "")
+    curated = await asyncio.to_thread(
+        generate_conversation_questions,
+        resume_text,
+        jd_text,
+        template_id or "default",
+        candidate_id,
+    )
+    if curated and curated.get("questions"):
+        await db.get_collection("interviews").update_one(
+            {"_id": ObjectId(interview_id)},
+            {"$set": {"curated_questions": curated, "updated_at": datetime.utcnow()}},
+        )
+        logger.info("Updated interview %s with %d LLM-generated conversation questions", interview_id, len(curated["questions"]))
+    else:
+        logger.info("No LLM questions generated for interview %s (using existing curated_questions)", interview_id)
 
     # Create / return session
     result = await repo.start_interview(interview_id, candidate_id)

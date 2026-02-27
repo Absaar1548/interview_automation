@@ -119,6 +119,7 @@ class InterviewRepository:
         """
         Returns the first interview for this candidate whose status is
         'scheduled' or 'in_progress'. Used by the candidate /active endpoint.
+        Caller must enforce 72h window from scheduled_at (interview vanishes after that).
         """
         doc = await self.collection.find_one(
             {
@@ -127,6 +128,22 @@ class InterviewRepository:
             }
         )
         return doc
+
+    async def mark_expired(self, interview_id: str) -> bool:
+        """
+        Set status to 'expired' and set expired_at. Used when interview
+        is past 72 hours from scheduled_at so it vanishes from candidate dashboard.
+        """
+        try:
+            oid = ObjectId(interview_id)
+        except Exception:
+            return False
+        now = datetime.utcnow()
+        result = await self.collection.update_one(
+            {"_id": oid},
+            {"$set": {"status": "expired", "expired_at": now, "updated_at": now}},
+        )
+        return result.modified_count == 1
 
     # ─── Start interview → create session ────────────────────────────────────
 
@@ -159,6 +176,7 @@ class InterviewRepository:
             "candidate_id": candidate_id,
             "started_at": now,
             "status": "active",
+            "answered_count": 0,
         }
         result = await sessions.insert_one(session_doc)
         session_id = str(result.inserted_id)

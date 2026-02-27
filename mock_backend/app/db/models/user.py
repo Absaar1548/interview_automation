@@ -46,7 +46,18 @@ class UserCreate(BaseModel):
     email: EmailStr  # Required
     password: str
     role: Literal["admin", "candidate"]  # Required
-    profile: UserProfile  # Required
+    profile: Optional[UserProfile] = None  # Optional; default set by validator from role
+
+    @model_validator(mode='after')
+    def set_default_profile_by_role(self):
+        """If profile is omitted, set a default profile based on role."""
+        if self.profile is not None:
+            return self
+        if self.role == "admin":
+            self.profile = AdminProfile()
+        else:
+            self.profile = CandidateProfile()
+        return self
 
 class UserInDB(UserBase):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
