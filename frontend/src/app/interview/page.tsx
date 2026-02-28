@@ -15,7 +15,6 @@ export default function InterviewPage() {
     const startInterview = useInterviewStore((s) => s.startInterview);
     const initialize = useInterviewStore((s) => s.initialize);
     const hasStarted = useRef(false);
-    const hasBootstrapped = useRef(false);
 
     const router = useRouter();
 
@@ -35,6 +34,13 @@ export default function InterviewPage() {
         hasStarted.current = true;
         startInterview();
     }, [interviewId, candidateToken, isConnected, startInterview, initialize, router]);
+
+    // Redirect to summary page when interview completes
+    useEffect(() => {
+        if (state === "COMPLETED") {
+            router.push("/summary");
+        }
+    }, [state, router]);
 
     if (!interviewId || !candidateToken) {
         return (
@@ -69,10 +75,11 @@ export default function InterviewPage() {
         );
     }
 
+    // COMPLETED → redirecting; show brief transition screen
     if (state === "COMPLETED") {
         return (
-            <div className="flex h-screen items-center justify-center text-green-600 text-2xl font-bold">
-                Interview Completed
+            <div className="flex h-screen items-center justify-center text-gray-500">
+                Preparing your results…
             </div>
         );
     }

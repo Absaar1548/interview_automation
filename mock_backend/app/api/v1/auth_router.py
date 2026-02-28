@@ -1,25 +1,37 @@
-from datetime import timedelta, datetime
-from typing import List, Optional
+import uuid
+from datetime import timedelta, datetime, timezone
+from typing import List
 from fastapi import APIRouter, HTTPException, status, Depends, Form, UploadFile, File
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 import secrets
-import os
-from pathlib import Path
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.schemas.auth import TokenResponse, LoginRequest, TokenData, CandidateResponse
-from app.db.database import get_database
-from app.db.repositories.user_repository import UserRepository
-from app.db.models.user import UserCreate, UserInDB, CandidateProfile
+from app.schemas.auth import TokenResponse, LoginRequest, CandidateResponse, AdminRegistrationRequest, AdminResponse
+from app.db.sql.session import get_db_session
+from app.db.sql.unit_of_work import UnitOfWork
+from app.db.sql.models.user import User, CandidateProfile, AdminProfile
+from app.db.sql.enums import UserRole
 from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.config import settings
 from app.services.email_service import email_service
+from app.services.admin_auth_service import AdminAuthSQLService
 
 router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db = Depends(get_database)):
+def validate_uuid(id_str: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(id_str)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid UUID: {id_str}",
+        )
+
+async def get_current_user(token: str = Depends(oauth2_scheme), session: AsyncSession = Depends(get_db_session)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -27,148 +39,130 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db = Depends(get
     )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
+        user_id_str: str = payload.get("sub")
+        if user_id_str is None:
             raise credentials_exception
-        token_data = TokenData(username=username)
+            
+        try:
+            user_id = uuid.UUID(user_id_str)
+        except ValueError:
+            raise credentials_exception
+            
     except JWTError:
         raise credentials_exception
     
-    repo = UserRepository(db)
-    user = await repo.get_user_by_username(token_data.username)
-    if user is None:
-        raise credentials_exception
-    return user
+    async with UnitOfWork(session) as uow:
+        user = await uow.users.get_by_id(user_id)
+        if user is None:
+            raise credentials_exception
+        return user
 
-async def get_current_active_user(current_user: UserInDB = Depends(get_current_user)):
+async def get_current_active_user(current_user: User = Depends(get_current_user)):
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
-async def get_current_admin(current_user: UserInDB = Depends(get_current_active_user)):
-    if current_user.role != "admin":
+async def get_current_admin(current_user: User = Depends(get_current_active_user)):
+    if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="The user doesn't have enough privileges")
     return current_user
 
 @router.post("/register/candidate", response_model=TokenResponse)
-async def register_candidate(user: UserCreate, db = Depends(get_database)):
-    # Validate that role is candidate
-    if user.role != "candidate":
-        raise HTTPException(status_code=400, detail="This endpoint is for candidate registration only")
-    
-    repo = UserRepository(db)
-    existing_user = await repo.get_user_by_username(user.username)
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    new_user = await repo.create_user(user)
-    
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=new_user.username, expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": new_user.username,
-        "role": new_user.role
-    }
+async def register_candidate(user_data: dict, session: AsyncSession = Depends(get_db_session)):
+    """Warning: mock route. Uses direct dictionary rather than Pydantic struct to bypass typing logic conflicts temporarily during migration."""
+    raise HTTPException(status_code=501, detail="Direct unauthenticated registration is intentionally disabled. Admins must provision candidates natively.")
 
-@router.post("/register/admin", response_model=TokenResponse)
-async def register_admin(user: UserCreate, db = Depends(get_database)):
-    # Validate that role is admin
-    if user.role != "admin":
-        raise HTTPException(status_code=400, detail="This endpoint is for admin registration only")
+@router.post("/register/admin", response_model=AdminResponse, status_code=status.HTTP_201_CREATED)
+async def register_admin(request: AdminRegistrationRequest, session: AsyncSession = Depends(get_db_session)):
+    """
+    Register a new administrator into the platform securely via SQL repositories.
+    """
+    user = await AdminAuthSQLService.register_admin(session=session, request=request)
     
-    repo = UserRepository(db)
-    existing_user = await repo.get_user_by_username(user.username)
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    new_user = await repo.create_user(user)
-    
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=new_user.username, expires_delta=access_token_expires
+    return AdminResponse(
+        id=str(user.id),
+        username=user.username,
+        email=user.email,
+        is_active=user.is_active,
+        role=user.role.value,
+        created_at=user.created_at
     )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": new_user.username,
-        "role": new_user.role
-    }
 
 @router.post("/login/admin", response_model=TokenResponse)
-async def login_admin(request: LoginRequest, db = Depends(get_database)):
-    repo = UserRepository(db)
-    user = await repo.get_user_by_username(request.username)
+async def login_admin(request: LoginRequest, session: AsyncSession = Depends(get_db_session)):
+    async with UnitOfWork(session) as uow:
+        user = await uow.users.get_by_username(request.username)
+        
+        if not user or not verify_password(request.password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect admin credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if user.role != UserRole.ADMIN:
+             raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not an admin",
+            )
     
-    if not user or not verify_password(request.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect admin credentials",
-            headers={"WWW-Authenticate": "Bearer"},
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            subject=str(user.id), expires_delta=access_token_expires
         )
     
-    if user.role != "admin":
-         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not an admin",
-        )
-
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=user.username, expires_delta=access_token_expires
-    )
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": user.username,
-        "role": "admin"
-    }
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "username": user.username,
+            "role": user.role.value
+        }
 
 @router.post("/login/candidate", response_model=TokenResponse)
-async def login_candidate(request: LoginRequest, db = Depends(get_database)):
-    repo = UserRepository(db)
-    user = await repo.get_user_by_username(request.username)
-    
-    if not user or not verify_password(request.password, user.hashed_password):
-         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect candidate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    if user.role != "candidate":
-         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not a candidate",
-        )
+async def login_candidate(request: LoginRequest, session: AsyncSession = Depends(get_db_session)):
+    async with UnitOfWork(session) as uow:
+        user = await uow.users.get_by_username(request.username)
         
-    if user.login_disabled:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Login has been disabled for this account. Please contact the administrator."
+        if not user or not verify_password(request.password, user.hashed_password):
+             raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect candidate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if user.role != UserRole.CANDIDATE:
+             raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not a candidate",
+            )
+            
+        if user.login_disabled:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Login has been disabled for this account. Please contact the administrator."
+            )
+    
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            subject=str(user.id), expires_delta=access_token_expires
         )
+    
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "username": user.username,
+            "role": user.role.value
+        }
 
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=user.username, expires_delta=access_token_expires
-    )
-
+@router.get("/me")
+async def read_users_me(current_user: User = Depends(get_current_active_user)):
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": user.username,
-        "role": "candidate"
+        "id": str(current_user.id),
+        "username": current_user.username,
+        "email": current_user.email,
+        "role": current_user.role.value,
+        "is_active": current_user.is_active,
     }
-
-@router.get("/me", response_model=UserInDB)
-async def read_users_me(current_user: UserInDB = Depends(get_current_active_user)):
-    return current_user
 
 @router.post("/logout")
 async def logout():
@@ -182,129 +176,104 @@ async def admin_register_candidate(
     candidate_email: str = Form(...),
     job_description: str = Form(...),
     resume: UploadFile = File(...),
-    current_admin: UserInDB = Depends(get_current_admin),
-    db = Depends(get_database)
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session)
 ):
-    repo = UserRepository(db)
+    async with UnitOfWork(session) as uow:
+        username = candidate_email.split('@')[0]
+        
+        existing_user = await uow.users.get_by_username(username)
+        if existing_user:
+             raise HTTPException(status_code=400, detail="Candidate with this email/username already exists")
     
-    # Check existing (using email as proxy for username check or we should check email uniqueness if we enforced it)
-    # The real backend uses email as unique, mock uses username.
-    # We will derive username from email.
-    username = candidate_email.split('@')[0]
-    
-    existing_user = await repo.get_user_by_username(username)
-    if existing_user:
-         raise HTTPException(status_code=400, detail="Candidate with this email/username already exists")
-
-    # Generate random password
-    password = secrets.token_urlsafe(12)
-    hashed_password = get_password_hash(password)
-    
-    # Fake Resume Upload logic (we won't actually save file to disk to avoid clutter, or maybe we should target a temp dir?)
-    # For now, let's just pretend efficiently.
-    resume_id = secrets.token_hex(8)
-    
-    # Create Candidate Profile
-    # Splitting name for first/last
-    names = candidate_name.split(" ", 1)
-    first_name = names[0]
-    last_name = names[1] if len(names) > 1 else ""
-    
-    profile = CandidateProfile(
-        first_name=first_name,
-        last_name=last_name,
-        resume_id=resume_id,
-        skills=[] # Default empty
-    )
-    
-    # Create User
-    # Note: UserCreate expects 'password', but we are creating manually.
-    # Repository `create_user` method takes `UserCreate` which performs hashing.
-    # So we should pass the raw password to `UserCreate`.
-    
-    user_create = UserCreate(
-        username=username,
-        email=candidate_email,
-        password=password,
-        role="candidate",
-        profile=profile
-    )
-    
-    new_user = await repo.create_user(user_create)
-    
-    # "Send" Email
-    await email_service.send_candidate_password_email(candidate_email, candidate_name, password)
-    
-    # Return response suitable for CandidateResponse
-    # We need to map UserInDB to CandidateResponse
-    return CandidateResponse(
-        id=str(new_user.id),
-        username=new_user.username,
-        email=new_user.email,
-        is_active=new_user.is_active,
-        login_disabled=new_user.login_disabled,
-        created_at=new_user.created_at,
-        job_description=job_description # This is not in UserDB but passed in request. 
-        # Wait, Real backend stores JD in Candidate model. UserInDB doesn't have JD field.
-        # We can just echo it back or ignore it since we are mocking.
-        # Let's echo it back.
-    )
+        password = secrets.token_urlsafe(12)
+        hashed_password = get_password_hash(password)
+        
+        resume_id = secrets.token_hex(8)
+        
+        names = candidate_name.split(" ", 1)
+        first_name = names[0]
+        last_name = names[1] if len(names) > 1 else ""
+        
+        new_user = User(
+            username=username,
+            email=candidate_email,
+            role=UserRole.CANDIDATE,
+            hashed_password=hashed_password,
+        )
+        
+        profile = CandidateProfile(
+            first_name=first_name,
+            last_name=last_name,
+            resume_id=resume_id,
+            skills=[]
+        )
+        new_user.candidate_profile = profile
+        
+        uow.users.create_user(new_user)
+        # Flush to get the ID for response
+        await uow.flush()
+        
+        await email_service.send_candidate_password_email(candidate_email, candidate_name, password)
+        
+        return CandidateResponse(
+            id=str(new_user.id),
+            username=new_user.username,
+            email=new_user.email,
+            is_active=new_user.is_active,
+            login_disabled=new_user.login_disabled,
+            created_at=new_user.created_at,
+            job_description=job_description 
+        )
 
 @router.get("/admin/candidates", response_model=List[CandidateResponse])
 async def get_all_candidates(
-    current_admin: UserInDB = Depends(get_current_admin),
-    db = Depends(get_database)
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session)
 ):
-    repo = UserRepository(db)
-    # We need a method in repo to specific roles? Or raw find.
-    # Repository extraction:
-    cursor = repo.collection.find({"role": "candidate"})
-    candidates = []
-    async for doc in cursor:
-        # Map doc to CandidateResponse
-        # Check if login_disabled exists in doc, default False
-        c = CandidateResponse(
-            id=str(doc["_id"]),
-            username=doc["username"],
-            email=doc["email"],
-            is_active=doc.get("is_active", True),
-            login_disabled=doc.get("login_disabled", False),
-            created_at=doc.get("created_at", datetime.utcnow()),
-            job_description="Mock JD" # JD not stored in User model
-        )
-        candidates.append(c)
-    return candidates
+    async with UnitOfWork(session) as uow:
+        # We need a robust way to list specifically candidates
+        result = await session.execute(select(User).where(User.role == UserRole.CANDIDATE))
+        users = result.scalars().all()
+        
+        candidates = []
+        for u in users:
+            c = CandidateResponse(
+                id=str(u.id),
+                username=u.username,
+                email=u.email,
+                is_active=u.is_active,
+                login_disabled=u.login_disabled,
+                created_at=u.created_at,
+                job_description="Mock JD"
+            )
+            candidates.append(c)
+        return candidates
 
 @router.post("/admin/candidates/{candidate_id}/toggle-login")
 async def toggle_candidate_login(
     candidate_id: str, 
-    current_admin: UserInDB = Depends(get_current_admin),
-    db = Depends(get_database)
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session)
 ):
-    repo = UserRepository(db)
-    from bson import ObjectId
-    try:
-        oid = ObjectId(candidate_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid ID format")
+    valid_id = validate_uuid(candidate_id)
+    
+    async with UnitOfWork(session) as uow:
+        # Direct fetch since we only need simple toggling
+        user = await uow.users.get_by_id(valid_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+            
+        if user.role != UserRole.CANDIDATE:
+            raise HTTPException(status_code=400, detail="User is not a candidate")
         
-    user = await repo.collection.find_one({"_id": oid})
-    if not user:
-        raise HTTPException(status_code=404, detail="Candidate not found")
+        new_status = not user.login_disabled
+        user.login_disabled = new_status
+        user.updated_at = datetime.now(timezone.utc)
         
-    if user["role"] != "candidate":
-        raise HTTPException(status_code=400, detail="User is not a candidate")
-    
-    new_status = not user.get("login_disabled", False)
-    
-    await repo.collection.update_one(
-        {"_id": oid},
-        {"$set": {"login_disabled": new_status, "updated_at": datetime.utcnow()}}
-    )
-    
-    return {
-        "message": f"Candidate login has been {'disabled' if new_status else 'enabled'}",
-        "candidate_id": str(user["_id"]),
-        "email": user["email"],
-        "login_disabled": new_status
-    }
+        return {
+            "message": f"Candidate login has been {'disabled' if new_status else 'enabled'}",
+            "candidate_id": str(user.id),
+            "email": user.email,
+            "login_disabled": new_status
+        }

@@ -136,6 +136,7 @@ export interface InterviewSummaryItem {
     candidate_id: string;
     status: string;
     scheduled_at: string | null;
+    overall_score: number | null;
 }
 
 export async function fetchInterviewSummary(): Promise<InterviewSummaryItem[]> {

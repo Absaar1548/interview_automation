@@ -1,19 +1,19 @@
 """
-Interview Router — Admin-only scheduling endpoints
+Interview Router — Admin-only scheduling endpoints (Refactored for SQLAlchemy)
 ----------------------------------------------------
 POST   /admin/interviews/schedule          – Create a new scheduled interview
 PUT    /admin/interviews/{id}/reschedule   – Move interview to a new datetime
 PUT    /admin/interviews/{id}/cancel       – Cancel a non-completed interview
 """
 
-from fastapi import APIRouter, Depends, status
-from motor.motor_asyncio import AsyncIOMotorDatabase
+import uuid
+from fastapi import APIRouter, Depends, status, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
-from bson import ObjectId as BSONObjectId
 
 from app.api.v1.auth_router import get_current_admin
-from app.db.database import get_database
-from app.db.models.user import UserInDB
+from app.db.sql.session import get_db_session
+from app.db.sql.models.user import User
 from app.schemas.interview import (
     ScheduleInterviewRequest,
     ScheduleInterviewResponse,
@@ -22,29 +22,19 @@ from app.schemas.interview import (
     CancelInterviewRequest,
     CancelInterviewResponse,
 )
-from app.db.repositories.interview_repository import InterviewRepository
-from app.services.interview_service import InterviewService
+from app.services.interview_admin_sql_service import InterviewAdminSQLService
+from app.db.sql.enums import InterviewStatus
 
 router = APIRouter()
 
-
-def _serialize_doc(doc: dict) -> dict:
-    """Recursively convert all ObjectId values in a MongoDB doc to strings."""
-    result = {}
-    for key, value in doc.items():
-        if isinstance(value, BSONObjectId):
-            result[key] = str(value)
-        elif isinstance(value, dict):
-            result[key] = _serialize_doc(value)
-        elif isinstance(value, list):
-            result[key] = [
-                _serialize_doc(v) if isinstance(v, dict) else (str(v) if isinstance(v, BSONObjectId) else v)
-                for v in value
-            ]
-        else:
-            result[key] = value
-    return result
-
+def validate_uuid(id_str: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(id_str)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid UUID: {id_str}",
+        )
 
 @router.get(
     "/templates",
@@ -52,15 +42,10 @@ def _serialize_doc(doc: dict) -> dict:
     description="Admin-only. Returns all interview templates with is_active=True.",
 )
 async def list_templates(
-    current_admin: UserInDB = Depends(get_current_admin),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    cursor = db["interview_templates"].find({"is_active": True})
-    templates = []
-    async for doc in cursor:
-        doc["id"] = str(doc.pop("_id"))
-        templates.append(_serialize_doc(doc))
-    return templates
+    return await InterviewAdminSQLService.list_active_templates(session)
 
 
 @router.get(
@@ -72,11 +57,20 @@ async def list_templates(
     ),
 )
 async def get_interview_summary(
-    current_admin: UserInDB = Depends(get_current_admin),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    repo = InterviewRepository(db)
-    return await repo.get_all_summary()
+    summary = await InterviewAdminSQLService.get_interview_summary(session)
+    return [
+        {
+            "interview_id": str(s["interview_id"]),
+            "candidate_id": str(s["candidate_id"]) if s["candidate_id"] else None,
+            "status": s["status"].value if isinstance(s["status"], InterviewStatus) else s["status"],
+            "scheduled_at": s["scheduled_at"],
+            "overall_score": s.get("overall_score"),
+        }
+        for s in summary
+    ]
 
 
 @router.post(
@@ -92,18 +86,30 @@ async def get_interview_summary(
 )
 async def schedule_interview(
     request: ScheduleInterviewRequest,
-    current_admin: UserInDB = Depends(get_current_admin),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    service = InterviewService(db)
-    interview = await service.schedule_interview(
-        candidate_id=request.candidate_id,
-        template_id=request.template_id,
+    template_id = validate_uuid(request.template_id)
+    candidate_id = validate_uuid(request.candidate_id)
+    
+    interview = await InterviewAdminSQLService.create_interview(
+        session=session,
+        template_id=template_id,
+        candidate_id=candidate_id,
+        assigned_by=current_admin.id,
         scheduled_at=request.scheduled_at,
-        admin_id=str(current_admin.id),
     )
-    return interview
-
+    
+    return {
+        "id": str(interview.id),
+        "candidate_id": str(interview.candidate_id),
+        "template_id": str(interview.template_id),
+        "assigned_by": str(interview.assigned_by),
+        "status": interview.status.value if isinstance(interview.status, InterviewStatus) else interview.status,
+        "scheduled_at": interview.scheduled_at,
+        "curated_questions": interview.curated_questions,
+        "created_at": interview.created_at,
+    }
 
 @router.put(
     "/{interview_id}/reschedule",
@@ -118,15 +124,22 @@ async def schedule_interview(
 async def reschedule_interview(
     interview_id: str,
     request: RescheduleInterviewRequest,
-    current_admin: UserInDB = Depends(get_current_admin),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    service = InterviewService(db)
-    result = await service.reschedule_interview(
-        interview_id=interview_id,
+    validated_id = validate_uuid(interview_id)
+    interview = await InterviewAdminSQLService.reschedule_interview(
+        session=session,
+        interview_id=validated_id,
         scheduled_at=request.scheduled_at,
     )
-    return result
+    
+    return {
+        "id": str(interview.id),
+        "status": interview.status.value if isinstance(interview.status, InterviewStatus) else interview.status,
+        "scheduled_at": interview.scheduled_at,
+        "updated_at": interview.updated_at,
+    }
 
 
 @router.put(
@@ -142,12 +155,19 @@ async def reschedule_interview(
 async def cancel_interview(
     interview_id: str,
     request: CancelInterviewRequest = CancelInterviewRequest(),
-    current_admin: UserInDB = Depends(get_current_admin),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    service = InterviewService(db)
-    result = await service.cancel_interview(
-        interview_id=interview_id,
+    validated_id = validate_uuid(interview_id)
+    interview = await InterviewAdminSQLService.cancel_interview(
+        session=session,
+        interview_id=validated_id,
         reason=request.reason,
     )
-    return result
+    
+    return {
+        "id": str(interview.id),
+        "status": interview.status.value if isinstance(interview.status, InterviewStatus) else interview.status,
+        "cancelled_at": interview.cancelled_at,
+        "reason": interview.cancellation_reason,
+    }

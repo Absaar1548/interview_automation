@@ -5,11 +5,9 @@ from app.api.v1 import interview_router
 from app.api.v1 import candidate_interview_router
 from app.api.v1 import session_router
 
-
-
-from app.db.database import connect_to_mongo, close_mongo_connection, get_database
-from app.db.seed import seed_interview_templates
-
+from contextlib import asynccontextmanager
+from app.db.sql.session import AsyncSessionLocal, test_database_connection
+from app.services.template_seed_service import ensure_default_template_exists
 import logging
 
 # Configure logging
@@ -19,22 +17,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Reduce pymongo verbosity - only show warnings and errors
-logging.getLogger("pymongo").setLevel(logging.WARNING)
-logging.getLogger("pymongo.topology").setLevel(logging.WARNING)
-logging.getLogger("pymongo.connection").setLevel(logging.WARNING)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Step 1: Verify database connectivity ──────────────────────────────────
+    logger.info("Initializing application and checking database connection...")
+    await test_database_connection()
 
-app = FastAPI(title="AI Interview Automation Mock Backend")
+    # ── Step 2: Seed default template if none exist ───────────────────────────
+    logger.info("Running template seed check...")
+    try:
+        async with AsyncSessionLocal() as session:
+            await ensure_default_template_exists(session)
+    except Exception as e:
+        logger.error("[template_seed] Seed failed (non-fatal): %s", e)
 
-@app.on_event("startup")
-async def startup_db_client():
-    await connect_to_mongo()
-    db = get_database()
-    await seed_interview_templates(db)
+    yield
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    logger.info("Application shutting down.")
 
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    await close_mongo_connection()
+app = FastAPI(title="AI Interview Automation Mock Backend", lifespan=lifespan)
 
 # CORS Middleware
 origins = [
