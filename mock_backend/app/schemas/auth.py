@@ -32,6 +32,12 @@ class CandidateResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class PaginatedCandidateResponse(BaseModel):
+    data: List[CandidateResponse]
+    total: int
+    limit: int
+    offset: int
+
 class AdminProfilePayload(BaseModel):
     first_name: str
     last_name: str

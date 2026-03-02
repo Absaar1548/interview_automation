@@ -125,9 +125,9 @@ class InterviewAdminSQLService:
             return interview
 
     @staticmethod
-    async def get_interview_summary(session: AsyncSession) -> List[Dict[str, Any]]:
+    async def get_interview_summary(session: AsyncSession, limit: int = 10, offset: int = 0, search: str = "") -> Dict[str, Any]:
         async with UnitOfWork(session) as uow:
-            return await uow.interviews.get_all_summary()
+            return await uow.interviews.get_all_summary(limit=limit, offset=offset, search=search)
 
     @staticmethod
     async def list_active_templates(session: AsyncSession) -> List[Dict[str, Any]]:

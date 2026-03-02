@@ -11,13 +11,13 @@ class Interview(Base):
     __tablename__ = "interviews"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_templates.id", ondelete="SET NULL"), nullable=True)
     assigned_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     
-    status: Mapped[InterviewStatus] = mapped_column(Enum(InterviewStatus), default=InterviewStatus.SCHEDULED)
+    status: Mapped[InterviewStatus] = mapped_column(Enum(InterviewStatus), default=InterviewStatus.SCHEDULED, index=True)
     
-    scheduled_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheduled_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     started_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=True)

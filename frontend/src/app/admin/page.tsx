@@ -16,7 +16,7 @@ import ScheduleInterviewModal from '@/components/admin/ScheduleInterviewModal';
 import CancelInterviewDialog from '@/components/admin/CancelInterviewDialog';
 import { Toast, useToast } from '@/components/ui/Toast';
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Types ----------------------------------------------------------------------
 
 interface DashboardStats {
     total_interviews: number;
@@ -29,7 +29,7 @@ interface CandidateRow extends CandidateResponse {
     summary: InterviewSummaryItem | null;
 }
 
-// â”€â”€â”€ Status badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Status badge ---------------------------------------------------------------
 
 const STATUS_STYLES: Record<string, string> = {
     scheduled: 'bg-blue-100 text-blue-800',
@@ -56,7 +56,7 @@ function InterviewStatusBadge({ status }: { status: string }) {
     );
 }
 
-// â”€â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// --- Main page ------------------------------------------------------------------
 
 export default function AdminDashboardPage() {
     const router = useRouter();
@@ -65,10 +65,16 @@ export default function AdminDashboardPage() {
 
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [candidates, setCandidates] = useState<CandidateRow[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [totalCandidates, setTotalCandidates] = useState(0);
+    const [limit, setLimit] = useState(10);
+    const [offset, setOffset] = useState(0);
+    const [search, setSearch] = useState('');
+
+    const [statsLoading, setStatsLoading] = useState(true);
+    const [candidatesLoading, setCandidatesLoading] = useState(true);
     const [error, setError] = useState('');
 
-    // â”€â”€ Register modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // -- Register modal ----------------------------------------------------------
     const [showRegisterModal, setShowRegisterModal] = useState(false);
     const [registerLoading, setRegisterLoading] = useState(false);
     const [registerError, setRegisterError] = useState('');
@@ -78,16 +84,16 @@ export default function AdminDashboardPage() {
     const [jobDescription, setJobDescription] = useState('');
     const [resumeFile, setResumeFile] = useState<File | null>(null);
 
-    // â”€â”€ Schedule / Reschedule â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // -- Schedule / Reschedule ---------------------------------------------------
     const [scheduleTarget, setScheduleTarget] = useState<CandidateRow | null>(null);
     const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule');
 
-    // â”€â”€ Cancel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // -- Cancel ------------------------------------------------------------------
     const [cancelTarget, setCancelTarget] = useState<CandidateRow | null>(null);
     const [summaryTarget, setSummaryTarget] = useState<CandidateRow | null>(null);
     const [cancelLoading, setCancelLoading] = useState(false);
 
-    // â”€â”€â”€ Auth guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // --- Auth guard -------------------------------------------------------------
     useEffect(() => {
         if (!_hasHydrated) return;  // wait for localStorage rehydration
         if (!isAuthenticated || !user) { router.push('/login/admin'); return; }
@@ -95,27 +101,65 @@ export default function AdminDashboardPage() {
             router.push(user.role === 'candidate' ? '/candidate' : '/login/admin');
             return;
         }
-        fetchData();
+        fetchStats();
     }, [_hasHydrated, isAuthenticated, user, router]);
 
-    // â”€â”€â”€ Fetch all data + build merged rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const fetchData = useCallback(async () => {
-        setLoading(true);
+    useEffect(() => {
+        if (isAuthenticated) {
+            fetchCandidates();
+        }
+    }, [isAuthenticated, limit, offset, search]);
+
+    const fetchStats = async () => {
+        setStatsLoading(true);
+        try {
+            const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+            const res = await fetch(`${baseUrl}/api/v1/dashboard/stats`);
+            if (res.ok) {
+                setStats(await res.json());
+            } else {
+                setStats({ total_interviews: 0, completed: 0, pending: 0, flagged: 0 });
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setStatsLoading(false);
+        }
+    };
+
+    const fetchCandidates = useCallback(async () => {
+        setCandidatesLoading(true);
         setError('');
         try {
             const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+            const currentToken = useAuthStore.getState().token;
+            const authHeader: Record<string, string> = currentToken ? { 'Authorization': `Bearer ${currentToken}` } : {};
 
-            const [statsRes, candidatesData, summaryData] = await Promise.all([
-                fetch(`${baseUrl}/api/v1/dashboard/stats`).then(r =>
-                    r.ok ? r.json() : { total_interviews: 0, completed: 0, pending: 0, flagged: 0 }
-                ),
-                dashboardService.getCandidates(),
-                fetchInterviewSummary().catch(() => [] as InterviewSummaryItem[]),
+            const params = new URLSearchParams({
+                limit: limit.toString(),
+                offset: offset.toString(),
+                search: search
+            });
+
+            const [candidatesRes, summaryRes] = await Promise.all([
+                fetch(`${baseUrl}/api/v1/auth/admin/candidates?${params.toString()}`, { headers: authHeader }).then(async r => {
+                    if (!r.ok) throw new Error('Failed to fetch candidates');
+                    return r.json();
+                }),
+                fetch(`${baseUrl}/api/v1/admin/interviews/summary?${params.toString()}`, { headers: authHeader }).then(async r => {
+                    if (!r.ok) return { data: [] };
+                    return r.json();
+                }).catch(() => ({ data: [] })),
             ]);
 
-            setStats(statsRes);
+            setTotalCandidates(candidatesRes.total || 0);
 
-            // Build a map: candidate_id â†’ most-relevant interview summary
+            let summaryData: InterviewSummaryItem[] = summaryRes?.data ?? [];
+            if (!Array.isArray(summaryData)) {
+                summaryData = [];
+            }
+
+            // Build a map: candidate_id -> most-relevant interview summary
             // Priority: scheduled > in_progress > completed > cancelled
             const PRIORITY: Record<string, number> = {
                 scheduled: 4, in_progress: 3, completed: 2, cancelled: 1,
@@ -128,19 +172,24 @@ export default function AdminDashboardPage() {
                 }
             }
 
-            const rows: CandidateRow[] = candidatesData.map(c => ({
+            const rows: CandidateRow[] = (candidatesRes.data || []).map((c: any) => ({
                 ...c,
                 summary: summaryMap.get(c.id) ?? null,
             }));
             setCandidates(rows);
         } catch (err: any) {
-            setError(err.message || 'Failed to load dashboard data.');
+            setError(err.message || 'Failed to load candidates.');
         } finally {
-            setLoading(false);
+            setCandidatesLoading(false);
         }
-    }, []);
+    }, [limit, offset, search]);
 
-    // â”€â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const fetchData = useCallback(() => {
+        fetchStats();
+        fetchCandidates();
+    }, [fetchCandidates]);
+
+    // --- Handlers ---------------------------------------------------------------
 
     const handleLogout = () => { logout(); router.push('/login/admin'); };
     const handleAuthError = () => { logout(); router.push('/login/admin'); };
@@ -214,14 +263,14 @@ export default function AdminDashboardPage() {
         }
     };
 
-    // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // --- Render -----------------------------------------------------------------
 
-    if (loading && candidates.length === 0) {
+    if ((statsLoading || candidatesLoading) && candidates.length === 0) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-                    <p className="text-gray-600">Loading dashboardâ€¦</p>
+                    <p className="text-gray-600">Loading dashboard...</p>
                 </div>
             </div>
         );
@@ -230,7 +279,7 @@ export default function AdminDashboardPage() {
     return (
         <div className="min-h-screen bg-gray-50">
 
-            {/* ── Candidate Summary Modal ──────────────────────────────────────────── */}
+            {/* -- Candidate Summary Modal -------------------------------------------- */}
             {summaryTarget && summaryTarget.summary?.overall_score != null && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 relative animate-in fade-in zoom-in-95">
@@ -247,7 +296,7 @@ export default function AdminDashboardPage() {
                         {/* Header */}
                         <div className="mb-5">
                             <h2 className="text-lg font-bold text-gray-900">Interview Results</h2>
-                            <p className="text-sm text-gray-500 mt-0.5">{summaryTarget.username} &mdash; {summaryTarget.email}</p>
+                            <p className="text-sm text-gray-500 mt-0.5">{summaryTarget.username} - {summaryTarget.email}</p>
                         </div>
 
                         {/* Score ring */}
@@ -279,7 +328,7 @@ export default function AdminDashboardPage() {
                         <div className="flex justify-center mb-5">
                             {(() => {
                                 const score = summaryTarget.summary!.overall_score!;
-                                const label = score >= 85 ? 'Strong — Proceed' : score >= 70 ? 'Recommend Review' : 'Needs Improvement';
+                                const label = score >= 85 ? 'Strong - Proceed' : score >= 70 ? 'Recommend Review' : 'Needs Improvement';
                                 const cls = score >= 85
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                     : score >= 70
@@ -358,7 +407,7 @@ export default function AdminDashboardPage() {
                         { label: 'Total Interviews', value: stats?.total_interviews ?? 0, color: 'text-gray-900' },
                         { label: 'Completed', value: stats?.completed ?? 0, color: 'text-green-600' },
                         { label: 'Pending Review', value: stats?.pending ?? 0, color: 'text-yellow-600' },
-                        { label: 'Candidates', value: candidates.length, color: 'text-blue-600' },
+                        { label: 'Candidates', value: totalCandidates, color: 'text-blue-600' },
                     ].map(s => (
                         <div key={s.label} className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
                             <p className="text-xs font-medium text-gray-500 mb-1">{s.label}</p>
@@ -367,12 +416,27 @@ export default function AdminDashboardPage() {
                     ))}
                 </div>
 
-                {/* Candidates table */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                        <h2 className="text-lg font-semibold text-gray-900">Registered Candidates</h2>
-                        <button onClick={fetchData} disabled={loading} className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50">
-                            {loading ? 'Refreshingâ€¦' : 'â†» Refresh'}
+                    <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-white flex-wrap gap-4">
+                        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                            <h2 className="text-lg font-semibold text-gray-900">Registered Candidates ({totalCandidates})</h2>
+                            <div className="relative">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-3">
+                                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                </span>
+                                <input
+                                    type="text"
+                                    placeholder="Search candidates..."
+                                    value={search}
+                                    onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
+                                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
+                                />
+                            </div>
+                        </div>
+                        <button onClick={fetchCandidates} disabled={candidatesLoading} className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 flex items-center gap-1">
+                            {candidatesLoading ? (
+                                <><svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Refreshing...</>
+                            ) : 'Refresh'}
                         </button>
                     </div>
                     <div className="overflow-x-auto">
@@ -419,7 +483,7 @@ export default function AdminDashboardPage() {
                                                     )}
                                                 </td>
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
-                                                    {s?.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : 'â€”'}
+                                                    {s?.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : '-'}
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${!candidate.login_disabled ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
@@ -474,6 +538,44 @@ export default function AdminDashboardPage() {
                                 )}
                             </tbody>
                         </table>
+                    </div>
+                    {/* Pagination Controls */}
+                    <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between flex-wrap gap-4">
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                            <span>Show</span>
+                            <select
+                                value={limit}
+                                onChange={(e) => { setLimit(Number(e.target.value)); setOffset(0); }}
+                                className="border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                                <option value={5}>5</option>
+                                <option value={10}>10</option>
+                                <option value={20}>20</option>
+                                <option value={50}>50</option>
+                            </select>
+                            <span>entries per page</span>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm">
+                            <span className="text-gray-600">
+                                Showing {candidates.length > 0 ? offset + 1 : 0} to {Math.min(offset + limit, totalCandidates)} of {totalCandidates} entries
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setOffset(Math.max(0, offset - limit))}
+                                    disabled={offset === 0 || candidatesLoading}
+                                    className="px-3 py-1.5 border border-gray-300 rounded hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent transition-colors font-medium text-gray-700 bg-gray-100"
+                                >
+                                    Previous
+                                </button>
+                                <button
+                                    onClick={() => setOffset(offset + limit)}
+                                    disabled={offset + limit >= totalCandidates || candidatesLoading}
+                                    className="px-3 py-1.5 border border-gray-300 rounded hover:bg-white disabled:opacity-50 disabled:hover:bg-transparent transition-colors font-medium text-gray-700 bg-gray-100"
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </main>
@@ -536,7 +638,7 @@ export default function AdminDashboardPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
                                 <textarea
                                     value={jobDescription} onChange={e => setJobDescription(e.target.value)}
-                                    rows={3} placeholder="Paste Job Description hereâ€¦" required disabled={registerLoading}
+                                    rows={3} placeholder="Paste Job Description here..." required disabled={registerLoading}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                             </div>
@@ -552,7 +654,7 @@ export default function AdminDashboardPage() {
                                 <button type="button" onClick={() => setShowRegisterModal(false)} disabled={registerLoading} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors disabled:opacity-50">Cancel</button>
                                 <button type="submit" disabled={registerLoading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                                     {registerLoading ? (
-                                        <><svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Registeringâ€¦</>
+                                        <><svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Registering...</>
                                     ) : 'Register Candidate'}
                                 </button>
                             </div>

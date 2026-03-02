@@ -9,7 +9,7 @@ import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.schemas.auth import TokenResponse, LoginRequest, CandidateResponse, AdminRegistrationRequest, AdminResponse
+from app.schemas.auth import TokenResponse, LoginRequest, CandidateResponse, AdminRegistrationRequest, AdminResponse, PaginatedCandidateResponse
 from app.db.sql.session import get_db_session
 from app.db.sql.unit_of_work import UnitOfWork
 from app.db.sql.models.user import User, CandidateProfile, AdminProfile
@@ -293,21 +293,54 @@ async def admin_register_candidate(
             job_description=job_description 
         )
 
-@router.get("/admin/candidates", response_model=List[CandidateResponse])
+@router.get("/admin/candidates", response_model=PaginatedCandidateResponse)
 async def get_all_candidates(
+    limit: int = 10,
+    offset: int = 0,
+    search: str = "",
     current_admin: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db_session)
 ):
     try:
         from sqlalchemy.orm import selectinload
+        from sqlalchemy import func, or_
+        from app.db.sql.models.user import CandidateProfile
         
         async with UnitOfWork(session) as uow:
+            # Base query
+            query = select(User).where(User.role == UserRole.CANDIDATE)
+            
+            # Apply search
+            if search:
+                search_term = f"%{search}%"
+                query = query.outerjoin(User.candidate_profile).where(
+                    or_(
+                        User.username.ilike(search_term),
+                        User.email.ilike(search_term),
+                        CandidateProfile.first_name.ilike(search_term),
+                        CandidateProfile.last_name.ilike(search_term),
+                    )
+                )
+
             # Eagerly load candidate_profile to avoid lazy loading issues
-            stmt = select(User).where(User.role == UserRole.CANDIDATE).options(
-                selectinload(User.candidate_profile)
-            )
+            stmt = query.options(selectinload(User.candidate_profile)).order_by(User.created_at.desc()).offset(offset).limit(limit)
             result = await session.execute(stmt)
             users = result.scalars().all()
+            
+            # Count total
+            count_stmt = select(func.count(User.id)).where(User.role == UserRole.CANDIDATE)
+            if search:
+                count_stmt = count_stmt.outerjoin(User.candidate_profile).where(
+                    or_(
+                        User.username.ilike(search_term),
+                        User.email.ilike(search_term),
+                        CandidateProfile.first_name.ilike(search_term),
+                        CandidateProfile.last_name.ilike(search_term),
+                    )
+                )
+            
+            total_result = await session.execute(count_stmt)
+            total = total_result.scalar() or 0
             
             candidates = []
             for u in users:
@@ -325,7 +358,13 @@ async def get_all_candidates(
                     job_description=job_desc or ""
                 )
                 candidates.append(c)
-            return candidates
+                
+            return {
+                "data": candidates,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
     except HTTPException:
         raise
     except Exception as e:

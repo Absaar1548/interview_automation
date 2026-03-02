@@ -57,11 +57,14 @@ async def list_templates(
     ),
 )
 async def get_interview_summary(
+    limit: int = 10,
+    offset: int = 0,
+    search: str = "",
     current_admin: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db_session),
 ):
-    summary = await InterviewAdminSQLService.get_interview_summary(session)
-    return [
+    result = await InterviewAdminSQLService.get_interview_summary(session, limit, offset, search)
+    data = [
         {
             "interview_id": str(s["interview_id"]),
             "candidate_id": str(s["candidate_id"]) if s["candidate_id"] else None,
@@ -69,8 +72,14 @@ async def get_interview_summary(
             "scheduled_at": s["scheduled_at"],
             "overall_score": s.get("overall_score"),
         }
-        for s in summary
+        for s in result["data"]
     ]
+    return {
+        "data": data,
+        "total": result["total"],
+        "limit": limit,
+        "offset": offset
+    }
 
 
 @router.post(
