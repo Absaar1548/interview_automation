@@ -9,7 +9,7 @@ from app.db.sql.unit_of_work import UnitOfWork
 from app.db.sql.enums import InterviewStatus, UserRole
 from app.db.sql.models.interview import Interview
 from app.db.sql.models.interview_template import InterviewTemplate
-from app.services.mock_question_curator import generate_curated_questions
+from app.services.question_generator_service import question_generator_service
 
 class InterviewAdminSQLService:
     @staticmethod
@@ -52,15 +52,18 @@ class InterviewAdminSQLService:
             # 4. Validate time
             InterviewAdminSQLService._assert_future_datetime(scheduled_at)
 
-            # 5. Build questions
+            # 5. Build questions using resume and JD
             resume_id = None
-            if candidate.candidate_profile and hasattr(candidate.candidate_profile, "resume_id"):
+            job_description = None
+            if candidate.candidate_profile:
                 resume_id = candidate.candidate_profile.resume_id
+                job_description = getattr(candidate.candidate_profile, "job_description", None)
 
-            curated_questions = generate_curated_questions(
+            curated_questions = question_generator_service.generate_curated_questions(
                 template_id=str(template_id),
                 candidate_id=str(candidate_id),
                 resume_id=resume_id,
+                job_description=job_description,
             )
 
             interview = Interview(

@@ -191,6 +191,16 @@ async def admin_register_candidate(
         
         resume_id = secrets.token_hex(8)
         
+        # Save resume file
+        import os
+        import shutil
+        upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "resumes")
+        os.makedirs(upload_dir, exist_ok=True)
+        resume_path = os.path.join(upload_dir, f"{resume_id}.pdf")
+        
+        with open(resume_path, "wb") as buffer:
+            shutil.copyfileobj(resume.file, buffer)
+        
         names = candidate_name.split(" ", 1)
         first_name = names[0]
         last_name = names[1] if len(names) > 1 else ""
@@ -206,13 +216,27 @@ async def admin_register_candidate(
             first_name=first_name,
             last_name=last_name,
             resume_id=resume_id,
-            skills=[]
+            skills=[],
+            job_description=job_description  # Store JD in profile
         )
         new_user.candidate_profile = profile
         
         uow.users.create_user(new_user)
         # Flush to get the ID for response
         await uow.flush()
+        
+        # Print credentials to terminal
+        print("\n" + "="*70)
+        print(" " * 20 + "CANDIDATE REGISTRATION SUCCESSFUL")
+        print("="*70)
+        print(f" Candidate Name: {candidate_name}")
+        print(f" Email: {candidate_email}")
+        print(f" Username: {username}")
+        print(f" Password: {password}")
+        print(f" Candidate ID: {new_user.id}")
+        print("="*70)
+        print(" " * 15 + "IMPORTANT: Save these credentials!")
+        print("="*70 + "\n")
         
         await email_service.send_candidate_password_email(candidate_email, candidate_name, password)
         

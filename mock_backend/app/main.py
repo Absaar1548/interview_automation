@@ -4,12 +4,13 @@ from app.api.v1 import auth_router, dashboard_router
 from app.api.v1 import interview_router
 from app.api.v1 import candidate_interview_router
 from app.api.v1 import session_router
+from app.api.v1 import verification_router
 
 from contextlib import asynccontextmanager
 from app.db.sql.session import AsyncSessionLocal, test_database_connection
 from app.services.template_seed_service import ensure_default_template_exists
 import logging
-
+ 
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
@@ -40,6 +41,7 @@ app = FastAPI(title="AI Interview Automation Mock Backend", lifespan=lifespan)
 # CORS Middleware
 origins = [
     "http://localhost:3000",
+    "http://localhost:3001",
 ]
 
 app.add_middleware(
@@ -56,6 +58,7 @@ app.include_router(dashboard_router.router, prefix="/api/v1/dashboard", tags=["D
 app.include_router(interview_router.router, prefix="/api/v1/admin/interviews", tags=["Interviews"])
 app.include_router(candidate_interview_router.router, prefix="/api/v1/candidate/interviews", tags=["Candidate Interviews"])
 app.include_router(session_router.router, prefix="/api/v1", tags=["Session"])
+app.include_router(verification_router.router, prefix="/api/v1/verification", tags=["Verification"])
 
 @app.get("/")
 async def root():
