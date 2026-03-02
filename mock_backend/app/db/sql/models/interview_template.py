@@ -26,9 +26,12 @@ class TemplateQuestion(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     template_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_templates.id", ondelete="CASCADE"), nullable=False)
-    question_text: Mapped[str] = mapped_column(String, nullable=False)
+    
+    question_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("questions.id", ondelete="CASCADE"), nullable=False)
+    
     question_type: Mapped[str] = mapped_column(String, nullable=False)
     time_limit_sec: Mapped[int] = mapped_column(Integer, default=120)
     order: Mapped[int] = mapped_column(Integer, default=0)
     
     template: Mapped["InterviewTemplate"] = relationship("InterviewTemplate", back_populates="questions")
+    question: Mapped["Question"] = relationship("Question", back_populates="template_questions")

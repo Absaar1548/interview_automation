@@ -67,11 +67,11 @@ export default function ResumePreviewModal({ candidate, onClose }: ResumePreview
                     <div className="flex items-center gap-4">
                         <div>
                             <h2 className="text-xl font-bold text-gray-900">Resume Preview</h2>
-                            <p className="text-sm text-gray-500 mt-0.5">{candidate.username} • {candidate.email}</p>
+                            <p className="text-sm text-gray-700 mt-0.5">{candidate.username} • {candidate.email}</p>
                         </div>
                         {candidate.match_score != null && (
                             <div className="flex flex-col items-center border-l border-gray-100 pl-4">
-                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Match Score</span>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">Match Score</span>
                                 <MatchScoreBadge score={candidate.match_score} />
                             </div>
                         )}
@@ -90,7 +90,7 @@ export default function ResumePreviewModal({ candidate, onClose }: ResumePreview
                 <div className="flex-1 overflow-y-auto p-6 space-y-8">
                     {/* Summary Section */}
                     <section>
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Professional Summary</h3>
+                        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-3">Professional Summary</h3>
                         <div className="bg-blue-50/50 border border-blue-100/50 p-4 rounded-xl text-gray-700 leading-relaxed italic">
                             "{summary}"
                         </div>
@@ -109,18 +109,18 @@ export default function ResumePreviewModal({ candidate, onClose }: ResumePreview
                                         <span key={i} className="px-3 py-1 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium shadow-sm hover:border-blue-300 transition-colors">
                                             {s}
                                         </span>
-                                    )) : <span className="text-gray-400 text-sm italic">No skills extracted.</span>}
+                                    )) : <span className="text-gray-600 text-sm italic">No skills extracted.</span>}
                                 </div>
                             </section>
 
                             <section>
-                                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-3 flex items-center gap-2">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                     Experience
                                 </h3>
                                 <div className="flex items-baseline gap-2">
                                     <span className="text-3xl font-bold text-blue-600">{experience}</span>
-                                    <span className="text-gray-500 font-medium">Years of Experience</span>
+                                    <span className="text-gray-700 font-medium">Years of Experience</span>
                                 </div>
                             </section>
                         </div>
@@ -128,7 +128,7 @@ export default function ResumePreviewModal({ candidate, onClose }: ResumePreview
                         {/* Education & JD Match */}
                         <div className="space-y-6">
                             <section>
-                                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-3 flex items-center gap-2">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.582.477 5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
                                     Education
                                 </h3>
@@ -136,14 +136,14 @@ export default function ResumePreviewModal({ candidate, onClose }: ResumePreview
                                     {education.length > 0 ? education.map((edu: any, i: number) => (
                                         <div key={i} className="border-l-2 border-gray-100 pl-4 py-1">
                                             <p className="text-sm font-bold text-gray-900">{edu.degree || 'Degree Unknown'}</p>
-                                            <p className="text-xs text-gray-500">{edu.institution || 'Institution Unknown'} • {edu.year || 'N/A'}</p>
+                                            <p className="text-xs text-gray-600">{edu.institution || 'Institution Unknown'} • {edu.year || 'N/A'}</p>
                                         </div>
-                                    )) : <span className="text-gray-400 text-sm italic">No education history found.</span>}
+                                    )) : <span className="text-gray-600 text-sm italic">No education history found.</span>}
                                 </div>
                             </section>
 
                             <section>
-                                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-3 flex items-center gap-2">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
                                     JD Required Skills
                                 </h3>
@@ -152,7 +152,7 @@ export default function ResumePreviewModal({ candidate, onClose }: ResumePreview
                                         <span key={i} className="px-3 py-1 bg-amber-50 border border-amber-100 text-amber-700 rounded-lg text-xs font-semibold">
                                             {s}
                                         </span>
-                                    )) : <span className="text-gray-400 text-sm italic">No required skills defined.</span>}
+                                    )) : <span className="text-gray-600 text-sm italic">No required skills defined.</span>}
                                 </div>
                             </section>
                         </div>
@@ -160,7 +160,7 @@ export default function ResumePreviewModal({ candidate, onClose }: ResumePreview
 
                     {showFullOriginal && originalBlobUrl && (
                         <div className="mt-8 border-t border-gray-100 pt-8 animate-in slide-in-from-bottom-4 duration-300">
-                            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-4 flex items-center gap-2">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                                 Original Document
                             </h3>

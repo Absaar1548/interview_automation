@@ -172,7 +172,7 @@ export default function ScheduleInterviewModal({
                                     onChange={(e) => setTemplateId(e.target.value)}
                                     required
                                     disabled={loading}
-                                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white disabled:bg-gray-50"
+                                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white disabled:bg-gray-50"
                                 >
                                     {templates.length === 0 && (
                                         <option value="">No active templates available</option>
@@ -198,9 +198,9 @@ export default function ScheduleInterviewModal({
                             onChange={(e) => setScheduledAt(e.target.value)}
                             required
                             disabled={loading}
-                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50"
+                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50"
                         />
-                        <p className="mt-1 text-xs text-gray-500">Defaults to now — adjust as needed.</p>
+                        <p className="mt-1 text-xs text-gray-600">Defaults to now — adjust as needed.</p>
                     </div>
 
                     {/* Actions */}

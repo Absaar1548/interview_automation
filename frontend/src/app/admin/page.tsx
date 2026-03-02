@@ -461,7 +461,7 @@ export default function AdminDashboardPage() {
                         { label: 'Candidates', value: totalCandidates, color: 'text-blue-600' },
                     ].map(s => (
                         <div key={s.label} className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
-                            <p className="text-xs font-medium text-gray-500 mb-1">{s.label}</p>
+                            <p className="text-xs font-medium text-gray-700 mb-1">{s.label}</p>
                             <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
                         </div>
                     ))}
@@ -492,7 +492,7 @@ export default function AdminDashboardPage() {
                                         setOrder(o);
                                         setOffset(0);
                                     }}
-                                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 >
                                     <option value="created_at:desc">Newest First</option>
                                     <option value="match_score:desc">Match Score (High → Low)</option>
@@ -509,7 +509,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
-                            <thead className="bg-gray-50 text-xs uppercase tracking-wider text-gray-500">
+                            <thead className="bg-gray-50 text-xs uppercase tracking-wider text-gray-700">
                                 <tr>
                                     <th className="px-6 py-3 text-left">Name</th>
                                     <th className="px-6 py-3 text-left">Email</th>
@@ -526,7 +526,7 @@ export default function AdminDashboardPage() {
                             <tbody className="divide-y divide-gray-100">
                                 {candidates.length === 0 ? (
                                     <tr>
-                                        <td colSpan={7} className="px-6 py-10 text-center text-gray-400">No candidates found.</td>
+                                        <td colSpan={7} className="px-6 py-10 text-center text-gray-600 font-medium">No candidates found.</td>
                                     </tr>
                                 ) : (
                                     candidates.map(candidate => {
@@ -539,7 +539,7 @@ export default function AdminDashboardPage() {
                                         return (
                                             <tr key={candidate.id} className="hover:bg-gray-50 transition-colors">
                                                 <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{candidate.username}</td>
-                                                <td className="px-6 py-4 text-gray-500 whitespace-nowrap">{candidate.email}</td>
+                                                <td className="px-6 py-4 text-gray-700 whitespace-nowrap">{candidate.email}</td>
                                                 <td className="px-6 py-4"><ResumeStatusBadge status={candidate.parse_status} /></td>
                                                 <td className="px-6 py-4"><MatchScoreBadge score={candidate.match_score} /></td>
                                                 <td className="px-6 py-4"><InterviewStatusBadge status={ivStatus} /></td>
@@ -562,7 +562,7 @@ export default function AdminDashboardPage() {
                                                         </span>
                                                     ) : <span className="text-gray-300 text-xs">-</span>}
                                                 </td>
-                                                <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
+                                                <td className="px-6 py-4 text-gray-700 whitespace-nowrap">
                                                     {s?.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : '-'}
                                                 </td>
                                                 <td className="px-6 py-4">
