@@ -7,8 +7,8 @@ from datetime import datetime
 
 class ScheduleInterviewRequest(BaseModel):
     """Request body for POST /admin/interviews/schedule"""
-    candidate_id: str = Field(..., description="ObjectId of the candidate user")
-    template_id: str = Field(..., description="ObjectId of the interview template")
+    candidate_id: str = Field(..., description="UUID of the candidate user")
+    template_id: str = Field(..., description="UUID of the interview template")
     scheduled_at: datetime = Field(..., description="Future UTC datetime for the interview")
 
 

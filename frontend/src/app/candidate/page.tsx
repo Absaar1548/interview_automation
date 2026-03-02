@@ -10,7 +10,14 @@ import {
     ActiveInterviewResponse,
     SchedulingApiError,
 } from '@/lib/api/interviews';
-import { verificationService, VerificationStatus } from '@/lib/verificationService';
+import {
+    getVerificationStatus,
+    uploadFaceSample,
+    uploadVoiceSample,
+    uploadVideoSample,
+    VerificationStatus,
+} from '@/lib/api/verification';
+import MediaCapture from '@/components/verification/MediaCapture';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
@@ -31,27 +38,16 @@ const STATUS_LABELS: Record<string, string> = {
 
 export default function CandidatePage() {
     const router = useRouter();
-    const { user, isAuthenticated, logout } = useAuthStore();
+    const { user, isAuthenticated, logout, _hasHydrated } = useAuthStore();
     const initializeInterview = useInterviewStore((s) => s.initialize);
 
     const [interview, setInterview] = useState<ActiveInterviewResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [startLoading, setStartLoading] = useState(false);
     const [error, setError] = useState('');
-
-    // Verification (face + voice) for interview monitoring
     const [verificationStatus, setVerificationStatus] = useState<VerificationStatus | null>(null);
-    const [verificationError, setVerificationError] = useState('');
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-    const [cameraActive, setCameraActive] = useState(false);
-    const [videoReady, setVideoReady] = useState(false);
-    const [capturedPhoto, setCapturedPhoto] = useState<Blob | null>(null);
-    const [faceLoading, setFaceLoading] = useState(false);
-    const [voiceRecording, setVoiceRecording] = useState(false);
-    const [voiceChunks, setVoiceChunks] = useState<Blob[]>([]);
-    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-    const [voiceLoading, setVoiceLoading] = useState(false);
+    const [verificationLoading, setVerificationLoading] = useState(true);
+    const [uploading, setUploading] = useState({ photo: false, video: false, audio: false });
 
     /** Read JWT from localStorage—same key used by authStore & API helpers. */
     const getJwt = (): string => {
@@ -68,8 +64,12 @@ export default function CandidatePage() {
         setLoading(true);
         setError('');
         try {
-            const data = await fetchActiveInterview();
-            setInterview(data);
+            const [interviewData, verificationData] = await Promise.all([
+                fetchActiveInterview(),
+                getVerificationStatus().catch(() => null),
+            ]);
+            setInterview(interviewData);
+            setVerificationStatus(verificationData);
         } catch (err: any) {
             const apiErr = err as SchedulingApiError;
             if (apiErr.status === 401 || apiErr.status === 403) {
@@ -80,10 +80,66 @@ export default function CandidatePage() {
             setError('Failed to load interview details. Please try again.');
         } finally {
             setLoading(false);
+            setVerificationLoading(false);
         }
     }, [logout, router]);
 
+    const fetchVerificationStatus = useCallback(async () => {
+        try {
+            const status = await getVerificationStatus();
+            setVerificationStatus(status);
+        } catch (err) {
+            console.error('Failed to fetch verification status:', err);
+        }
+    }, []);
+
+    const handlePhotoCapture = async (file: File) => {
+        setUploading(prev => ({ ...prev, photo: true }));
+        setError('');
+        try {
+            await uploadFaceSample(file);
+            await fetchVerificationStatus();
+            // Refresh interview data to update can_start status
+            const interviewData = await fetchActiveInterview();
+            setInterview(interviewData);
+        } catch (err: any) {
+            setError(err.message || 'Failed to upload photo');
+        } finally {
+            setUploading(prev => ({ ...prev, photo: false }));
+        }
+    };
+
+    const handleVideoCapture = async (file: File) => {
+        setUploading(prev => ({ ...prev, video: true }));
+        setError('');
+        try {
+            await uploadVideoSample(file);
+            await fetchVerificationStatus();
+        } catch (err: any) {
+            setError(err.message || 'Failed to upload video');
+        } finally {
+            setUploading(prev => ({ ...prev, video: false }));
+        }
+    };
+
+    const handleVoiceCapture = async (file: File) => {
+        setUploading(prev => ({ ...prev, audio: true }));
+        setError('');
+        try {
+            await uploadVoiceSample(file);
+            await fetchVerificationStatus();
+            // Refresh interview data to update can_start status
+            const interviewData = await fetchActiveInterview();
+            setInterview(interviewData);
+        } catch (err: any) {
+            setError(err.message || 'Failed to upload voice sample');
+        } finally {
+            setUploading(prev => ({ ...prev, audio: false }));
+        }
+    };
+
     useEffect(() => {
+        if (!_hasHydrated) return;  // wait for localStorage rehydration
         if (!isAuthenticated || !user) {
             router.push('/login/candidate');
             return;
@@ -93,150 +149,18 @@ export default function CandidatePage() {
             return;
         }
         fetchData();
-    }, [isAuthenticated, user, router, fetchData]);
+    }, [_hasHydrated, isAuthenticated, user, router, fetchData]);
 
-    // ─── Verification status ─────────────────────────────────────────────────
-    const loadVerificationStatus = useCallback(async () => {
-        try {
-            const status = await verificationService.getVerificationStatus();
-            setVerificationStatus(status);
-        } catch {
-            setVerificationStatus({ face_enrolled: false, voice_enrolled: false, face_updated_at: null, voice_updated_at: null });
-        }
-    }, []);
-    useEffect(() => {
-        if (isAuthenticated && user?.role === 'candidate') loadVerificationStatus();
-    }, [isAuthenticated, user?.role, loadVerificationStatus]);
-
-    // ─── Face: start/stop camera, capture, upload ────────────────────────────
-    const startCamera = useCallback(async () => {
-        setVerificationError('');
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-            });
-            streamRef.current = stream;
-            setCapturedPhoto(null);
-            setCameraActive(true);
-        } catch (e) {
-            setVerificationError('Could not access camera. Please allow camera permission.');
-        }
-    }, []);
-
-    // Attach stream to video once the video element is mounted (cameraActive true)
-    useEffect(() => {
-        if (!cameraActive || !streamRef.current || !videoRef.current) return;
-        const video = videoRef.current;
-        const stream = streamRef.current;
-        video.srcObject = stream;
-        setVideoReady(false);
-        const onCanPlay = () => setVideoReady(true);
-        video.addEventListener('canplay', onCanPlay, { once: true });
-        video.play().catch(() => {});
-        return () => video.removeEventListener('canplay', onCanPlay);
-    }, [cameraActive]);
-    const stopCamera = useCallback(() => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach((t) => t.stop());
-            streamRef.current = null;
-        }
-        if (videoRef.current) videoRef.current.srcObject = null;
-        setCameraActive(false);
-        setVideoReady(false);
-        setCapturedPhoto(null);
-    }, []);
-    const capturePhoto = useCallback(() => {
-        const video = videoRef.current;
-        if (!video || !streamRef.current) return;
-        let w = video.videoWidth;
-        let h = video.videoHeight;
-        if (!w || !h) {
-            w = 640;
-            h = 480;
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(video, 0, 0, w, h);
-        canvas.toBlob(
-            (blob) => {
-                if (blob) setCapturedPhoto(blob);
-            },
-            'image/jpeg',
-            0.9
-        );
-    }, []);
-    const submitFace = useCallback(async () => {
-        if (!capturedPhoto) return;
-        setFaceLoading(true);
-        setVerificationError('');
-        try {
-            await verificationService.uploadFace(capturedPhoto, 'photo.jpg');
-            await loadVerificationStatus();
-            stopCamera();
-        } catch (e: unknown) {
-            setVerificationError((e as { message?: string })?.message || 'Failed to upload photo.');
-        } finally {
-            setFaceLoading(false);
-        }
-    }, [capturedPhoto, loadVerificationStatus, stopCamera]);
-    useEffect(() => {
-        return () => {
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach((t) => t.stop());
-            }
-        };
-    }, []);
-
-    // ─── Voice: record and upload ─────────────────────────────────────────────
-    const startVoiceRecording = useCallback(async () => {
-        setVerificationError('');
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const recorder = new MediaRecorder(stream);
-            const chunks: Blob[] = [];
-            recorder.ondataavailable = (e) => {
-                if (e.data.size > 0) chunks.push(e.data);
-            };
-            recorder.onstop = () => {
-                stream.getTracks().forEach((t) => t.stop());
-                setVoiceChunks(chunks);
-            };
-            recorder.start(200);
-            mediaRecorderRef.current = recorder;
-            setVoiceRecording(true);
-            setVoiceChunks([]);
-        } catch (e) {
-            setVerificationError('Could not access microphone. Please allow microphone permission.');
-        }
-    }, []);
-    const stopVoiceRecording = useCallback(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-            mediaRecorderRef.current.stop();
-        }
-        setVoiceRecording(false);
-    }, []);
-    const submitVoice = useCallback(async () => {
-        if (voiceChunks.length === 0) return;
-        setVoiceLoading(true);
-        setVerificationError('');
-        try {
-            const blob = new Blob(voiceChunks, { type: 'audio/webm' });
-            await verificationService.uploadVoice(blob, 'recording.webm');
-            await loadVerificationStatus();
-            setVoiceChunks([]);
-        } catch (e: unknown) {
-            setVerificationError((e as { message?: string })?.message || 'Failed to upload voice.');
-        } finally {
-            setVoiceLoading(false);
-        }
-    }, [voiceChunks, loadVerificationStatus]);
 
     // ─── Start / Rejoin interview ────────────────────────────────────────────
     const handleStart = async () => {
         if (!interview) return;
+        
+        // Check verification status before starting
+        if (!verificationStatus?.can_start_interview) {
+            setError('Please complete identity verification (upload photo and voice sample) before starting the interview.');
+            return;
+        }
         setStartLoading(true);
         setError('');
         try {
@@ -323,136 +247,46 @@ export default function CandidatePage() {
                 {error && (
                     <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>
                 )}
-                {verificationError && (
-                    <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-sm">{verificationError}</div>
-                )}
 
-                {/* Verification setup — face & voice for interview monitoring */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-100">
-                        <h2 className="text-base font-semibold text-gray-900">Verification Setup</h2>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                            Upload your live photo and voice. These will be used for face and audio verification during the interview.
-                        </p>
-                    </div>
-                    <div className="p-6 grid gap-6 sm:grid-cols-2">
-                        {/* Face */}
-                        <div className="space-y-3">
-                            <div className="flex items-center gap-2">
-                                <h3 className="text-sm font-medium text-gray-700">Face (live camera)</h3>
-                                {verificationStatus?.face_enrolled && (
-                                    <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">Enrolled</span>
-                                )}
-                            </div>
-                            {!cameraActive && !capturedPhoto ? (
-                                <button
-                                    type="button"
-                                    onClick={startCamera}
-                                    className="w-full py-2.5 px-4 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
-                                >
-                                    Start camera
-                                </button>
-                            ) : (
-                                <div className="space-y-2">
-                                    {cameraActive && (
-                                        <div className="relative w-full rounded-lg bg-gray-900 aspect-video overflow-hidden">
-                                            <video
-                                                ref={videoRef}
-                                                autoPlay
-                                                playsInline
-                                                muted
-                                                className="w-full h-full object-cover"
-                                                style={{ transform: 'scaleX(1)' }}
-                                            />
-                                            {!videoReady && (
-                                                <div className="absolute inset-0 flex items-center justify-center bg-gray-900 text-gray-400 text-sm">
-                                                    Loading camera…
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                    {capturedPhoto && (
-                                        <p className="text-xs text-gray-500">Photo captured. Submit or capture again.</p>
-                                    )}
-                                    <div className="flex flex-wrap gap-2">
-                                        {cameraActive && (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    onClick={capturePhoto}
-                                                    disabled={!videoReady}
-                                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    Capture photo
-                                                </button>
-                                                <button type="button" onClick={stopCamera} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                                    Cancel
-                                                </button>
-                                            </>
-                                        )}
-                                        {capturedPhoto && (
-                                            <button
-                                                type="button"
-                                                onClick={submitFace}
-                                                disabled={faceLoading}
-                                                className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
-                                            >
-                                                {faceLoading ? 'Uploading…' : 'Submit photo'}
-                                            </button>
-                                        )}
-                                    </div>
+                {/* Verification Section */}
+                {!verificationLoading && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-100">
+                            <h2 className="text-base font-semibold text-gray-900">Identity Verification</h2>
+                            <p className="text-sm text-gray-600 mt-1">
+                                Please upload your photo and voice sample to verify your identity before starting the interview.
+                            </p>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <MediaCapture
+                                type="photo"
+                                onCapture={handlePhotoCapture}
+                                isUploading={uploading.photo}
+                                isVerified={verificationStatus?.face_verified || false}
+                            />
+                            <MediaCapture
+                                type="audio"
+                                onCapture={handleVoiceCapture}
+                                isUploading={uploading.audio}
+                                isVerified={verificationStatus?.voice_verified || false}
+                            />
+                            
+                            {verificationStatus?.can_start_interview && (
+                                <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                                    </svg>
+                                    <span>All verification samples uploaded successfully. You can now start your interview.</span>
                                 </div>
                             )}
-                        </div>
-                        {/* Voice */}
-                        <div className="space-y-3">
-                            <div className="flex items-center gap-2">
-                                <h3 className="text-sm font-medium text-gray-700">Voice (live recording)</h3>
-                                {verificationStatus?.voice_enrolled && (
-                                    <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">Enrolled</span>
-                                )}
-                            </div>
-                            {!voiceRecording && voiceChunks.length === 0 ? (
-                                <button
-                                    type="button"
-                                    onClick={startVoiceRecording}
-                                    className="w-full py-2.5 px-4 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
-                                >
-                                    Start recording
-                                </button>
-                            ) : (
-                                <div className="space-y-2">
-                                    {voiceRecording && (
-                                        <p className="text-sm text-gray-600 flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> Recording… Speak for a few seconds, then stop.
-                                        </p>
-                                    )}
-                                    <div className="flex flex-wrap gap-2">
-                                        {voiceRecording ? (
-                                            <button type="button" onClick={stopVoiceRecording} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">
-                                                Stop recording
-                                            </button>
-                                        ) : voiceChunks.length > 0 ? (
-                                            <>
-                                                <button
-                                                    type="button"
-                                                    onClick={submitVoice}
-                                                    disabled={voiceLoading}
-                                                    className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
-                                                >
-                                                    {voiceLoading ? 'Uploading…' : 'Submit voice'}
-                                                </button>
-                                                <button type="button" onClick={() => setVoiceChunks([])} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
-                                                    Record again
-                                                </button>
-                                            </>
-                                        ) : null}
-                                    </div>
+                            {!verificationStatus?.can_start_interview && (
+                                <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                                    Please complete identity verification (upload photo and voice sample) before starting the interview.
                                 </div>
                             )}
                         </div>
                     </div>
-                </div>
+                )}
 
                 {/* Interview card */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -487,7 +321,7 @@ export default function CandidatePage() {
                             </div>
 
                             {/* can_start gate */}
-                            {interview.can_start ? (
+                            {interview.can_start && verificationStatus?.can_start_interview ? (
                                 <button
                                     onClick={handleStart}
                                     disabled={startLoading}
@@ -515,9 +349,20 @@ export default function CandidatePage() {
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 flex-shrink-0 mt-0.5">
                                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clipRule="evenodd" />
                                     </svg>
-                                    <span>
-                                        Your interview is scheduled for <strong>{scheduledDisplay}</strong>. The Start button will unlock at that time.
-                                    </span>
+                                    <div className="flex-1">
+                                        {interview.scheduled_at && new Date(interview.scheduled_at) > new Date() ? (
+                                            <span>
+                                                Your interview is scheduled for <strong>{scheduledDisplay}</strong>. The Start button will unlock at that time.
+                                            </span>
+                                        ) : (
+                                            <span>
+                                                {!verificationStatus?.can_start_interview 
+                                                    ? "Please complete identity verification (upload photo and voice sample) before starting the interview."
+                                                    : "Please wait for the scheduled time to start the interview."
+                                                }
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </div>

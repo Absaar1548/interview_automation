@@ -16,7 +16,7 @@ import ScheduleInterviewModal from '@/components/admin/ScheduleInterviewModal';
 import CancelInterviewDialog from '@/components/admin/CancelInterviewDialog';
 import { Toast, useToast } from '@/components/ui/Toast';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface DashboardStats {
     total_interviews: number;
@@ -29,7 +29,7 @@ interface CandidateRow extends CandidateResponse {
     summary: InterviewSummaryItem | null;
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Status badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const STATUS_STYLES: Record<string, string> = {
     scheduled: 'bg-blue-100 text-blue-800',
@@ -56,11 +56,11 @@ function InterviewStatusBadge({ status }: { status: string }) {
     );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function AdminDashboardPage() {
     const router = useRouter();
-    const { user, isAuthenticated, logout } = useAuthStore();
+    const { user, isAuthenticated, logout, _hasHydrated } = useAuthStore();
     const toast = useToast();
 
     const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -68,7 +68,7 @@ export default function AdminDashboardPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    // ── Register modal ────────────────────────────────────────────────────────
+    // â”€â”€ Register modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [showRegisterModal, setShowRegisterModal] = useState(false);
     const [registerLoading, setRegisterLoading] = useState(false);
     const [registerError, setRegisterError] = useState('');
@@ -78,25 +78,27 @@ export default function AdminDashboardPage() {
     const [jobDescription, setJobDescription] = useState('');
     const [resumeFile, setResumeFile] = useState<File | null>(null);
 
-    // ── Schedule / Reschedule ─────────────────────────────────────────────────
+    // â”€â”€ Schedule / Reschedule â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [scheduleTarget, setScheduleTarget] = useState<CandidateRow | null>(null);
     const [scheduleMode, setScheduleMode] = useState<'schedule' | 'reschedule'>('schedule');
 
-    // ── Cancel ────────────────────────────────────────────────────────────────
+    // â”€â”€ Cancel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const [cancelTarget, setCancelTarget] = useState<CandidateRow | null>(null);
+    const [summaryTarget, setSummaryTarget] = useState<CandidateRow | null>(null);
     const [cancelLoading, setCancelLoading] = useState(false);
 
-    // ─── Auth guard ───────────────────────────────────────────────────────────
+    // â”€â”€â”€ Auth guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     useEffect(() => {
+        if (!_hasHydrated) return;  // wait for localStorage rehydration
         if (!isAuthenticated || !user) { router.push('/login/admin'); return; }
         if (user.role !== 'admin' && user.role !== 'hr') {
             router.push(user.role === 'candidate' ? '/candidate' : '/login/admin');
             return;
         }
         fetchData();
-    }, [isAuthenticated, user, router]);
+    }, [_hasHydrated, isAuthenticated, user, router]);
 
-    // ─── Fetch all data + build merged rows ──────────────────────────────────
+    // â”€â”€â”€ Fetch all data + build merged rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const fetchData = useCallback(async () => {
         setLoading(true);
         setError('');
@@ -113,7 +115,7 @@ export default function AdminDashboardPage() {
 
             setStats(statsRes);
 
-            // Build a map: candidate_id → most-relevant interview summary
+            // Build a map: candidate_id â†’ most-relevant interview summary
             // Priority: scheduled > in_progress > completed > cancelled
             const PRIORITY: Record<string, number> = {
                 scheduled: 4, in_progress: 3, completed: 2, cancelled: 1,
@@ -138,7 +140,7 @@ export default function AdminDashboardPage() {
         }
     }, []);
 
-    // ─── Handlers ─────────────────────────────────────────────────────────────
+    // â”€â”€â”€ Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     const handleLogout = () => { logout(); router.push('/login/admin'); };
     const handleAuthError = () => { logout(); router.push('/login/admin'); };
@@ -212,14 +214,14 @@ export default function AdminDashboardPage() {
         }
     };
 
-    // ─── Render ───────────────────────────────────────────────────────────────
+    // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     if (loading && candidates.length === 0) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-                    <p className="text-gray-600">Loading dashboard…</p>
+                    <p className="text-gray-600">Loading dashboardâ€¦</p>
                 </div>
             </div>
         );
@@ -227,6 +229,95 @@ export default function AdminDashboardPage() {
 
     return (
         <div className="min-h-screen bg-gray-50">
+
+            {/* ── Candidate Summary Modal ──────────────────────────────────────────── */}
+            {summaryTarget && summaryTarget.summary?.overall_score != null && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 relative animate-in fade-in zoom-in-95">
+                        {/* Close */}
+                        <button
+                            onClick={() => setSummaryTarget(null)}
+                            className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+
+                        {/* Header */}
+                        <div className="mb-5">
+                            <h2 className="text-lg font-bold text-gray-900">Interview Results</h2>
+                            <p className="text-sm text-gray-500 mt-0.5">{summaryTarget.username} &mdash; {summaryTarget.email}</p>
+                        </div>
+
+                        {/* Score ring */}
+                        <div className="flex flex-col items-center mb-6">
+                            {(() => {
+                                const score = summaryTarget.summary!.overall_score!;
+                                const color = score >= 85 ? '#10b981' : score >= 70 ? '#f59e0b' : '#ef4444';
+                                const r = 44;
+                                const circ = 2 * Math.PI * r;
+                                const dash = circ * (score / 100);
+                                return (
+                                    <div className="relative flex items-center justify-center w-28 h-28">
+                                        <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 100 100">
+                                            <circle cx="50" cy="50" r={r} fill="none" stroke="#e5e7eb" strokeWidth="9" />
+                                            <circle cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="9"
+                                                strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" />
+                                        </svg>
+                                        <div className="z-10 text-center">
+                                            <p className="text-2xl font-extrabold text-gray-900">{score.toFixed(1)}</p>
+                                            <p className="text-xs text-gray-400">/ 100</p>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                            <p className="mt-2 text-sm text-gray-500">Overall Score</p>
+                        </div>
+
+                        {/* Status badge */}
+                        <div className="flex justify-center mb-5">
+                            {(() => {
+                                const score = summaryTarget.summary!.overall_score!;
+                                const label = score >= 85 ? 'Strong — Proceed' : score >= 70 ? 'Recommend Review' : 'Needs Improvement';
+                                const cls = score >= 85
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : score >= 70
+                                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                        : 'bg-red-50 text-red-700 border-red-200';
+                                return (
+                                    <span className={`px-4 py-1.5 rounded-full text-xs font-semibold border ${cls}`}>
+                                        {label}
+                                    </span>
+                                );
+                            })()}
+                        </div>
+
+                        {/* Meta */}
+                        <div className="space-y-2 text-sm border-t border-gray-100 pt-4">
+                            <div className="flex justify-between text-gray-600">
+                                <span>Status</span>
+                                <span className="font-medium capitalize">{summaryTarget.summary?.status}</span>
+                            </div>
+                            {summaryTarget.summary?.scheduled_at && (
+                                <div className="flex justify-between text-gray-600">
+                                    <span>Scheduled</span>
+                                    <span className="font-medium">{new Date(summaryTarget.summary.scheduled_at).toLocaleString()}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Close button */}
+                        <button
+                            onClick={() => setSummaryTarget(null)}
+                            className="mt-5 w-full py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition-colors"
+                        >
+                            Close
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <Toast toasts={toast.toasts} onDismiss={toast.dismiss} />
 
             {/* Header */}
@@ -281,7 +372,7 @@ export default function AdminDashboardPage() {
                     <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                         <h2 className="text-lg font-semibold text-gray-900">Registered Candidates</h2>
                         <button onClick={fetchData} disabled={loading} className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50">
-                            {loading ? 'Refreshing…' : '↻ Refresh'}
+                            {loading ? 'Refreshingâ€¦' : 'â†» Refresh'}
                         </button>
                     </div>
                     <div className="overflow-x-auto">
@@ -291,6 +382,7 @@ export default function AdminDashboardPage() {
                                     <th className="px-6 py-3 text-left">Name</th>
                                     <th className="px-6 py-3 text-left">Email</th>
                                     <th className="px-6 py-3 text-left">Interview Status</th>
+                                    <th className="px-6 py-3 text-left">Score</th>
                                     <th className="px-6 py-3 text-left">Scheduled At</th>
                                     <th className="px-6 py-3 text-left">Login</th>
                                     <th className="px-6 py-3 text-right">Actions</th>
@@ -299,7 +391,7 @@ export default function AdminDashboardPage() {
                             <tbody className="divide-y divide-gray-100">
                                 {candidates.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6} className="px-6 py-10 text-center text-gray-400">No candidates found.</td>
+                                        <td colSpan={7} className="px-6 py-10 text-center text-gray-400">No candidates found.</td>
                                     </tr>
                                 ) : (
                                     candidates.map(candidate => {
@@ -314,8 +406,20 @@ export default function AdminDashboardPage() {
                                                 <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{candidate.username}</td>
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap">{candidate.email}</td>
                                                 <td className="px-6 py-4"><InterviewStatusBadge status={ivStatus} /></td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    {s?.overall_score != null ? (
+                                                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${s.overall_score >= 85 ? 'bg-emerald-100 text-emerald-800' :
+                                                            s.overall_score >= 70 ? 'bg-amber-100 text-amber-800' :
+                                                                'bg-red-100 text-red-800'
+                                                            }`}>
+                                                            {s.overall_score.toFixed(1)}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-300 text-xs">-</span>
+                                                    )}
+                                                </td>
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
-                                                    {s?.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : '—'}
+                                                    {s?.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : 'â€”'}
                                                 </td>
                                                 <td className="px-6 py-4">
                                                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${!candidate.login_disabled ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
@@ -346,6 +450,14 @@ export default function AdminDashboardPage() {
                                                                 className="px-3 py-1.5 bg-red-50 text-red-700 rounded-md text-xs font-semibold hover:bg-red-100 transition-colors"
                                                             >
                                                                 Cancel
+                                                            </button>
+                                                        )}
+                                                        {ivStatus === 'completed' && s?.overall_score != null && (
+                                                            <button
+                                                                onClick={() => setSummaryTarget(candidate)}
+                                                                className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-md text-xs font-semibold hover:bg-purple-100 transition-colors"
+                                                            >
+                                                                View Results
                                                             </button>
                                                         )}
                                                         <button
@@ -424,7 +536,7 @@ export default function AdminDashboardPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
                                 <textarea
                                     value={jobDescription} onChange={e => setJobDescription(e.target.value)}
-                                    rows={3} placeholder="Paste Job Description here…" required disabled={registerLoading}
+                                    rows={3} placeholder="Paste Job Description hereâ€¦" required disabled={registerLoading}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                             </div>
@@ -440,7 +552,7 @@ export default function AdminDashboardPage() {
                                 <button type="button" onClick={() => setShowRegisterModal(false)} disabled={registerLoading} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors disabled:opacity-50">Cancel</button>
                                 <button type="submit" disabled={registerLoading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                                     {registerLoading ? (
-                                        <><svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Registering…</>
+                                        <><svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>Registeringâ€¦</>
                                     ) : 'Register Candidate'}
                                 </button>
                             </div>

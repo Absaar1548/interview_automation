@@ -5,22 +5,23 @@ Used on candidate dashboard to capture live photo and voice for later
 face/audio verification during the interview (Azure Face API + Azure Speech Service).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_router import get_current_active_user
-from app.db.database import get_database
-from app.db.models.user import UserInDB
+from app.db.sql.session import get_db_session
+from app.db.sql.models.user import User
+from app.db.sql.enums import UserRole
+from app.db.sql.unit_of_work import UnitOfWork
 from app.services.face_service import face_service
 from app.services.speech_service import speech_service
 
 router = APIRouter()
-COLLECTION_NAME = "candidate_biometrics"
 
 
-async def get_current_candidate(current_user: UserInDB = Depends(get_current_active_user)) -> UserInDB:
-    if current_user.role != "candidate":
+async def get_current_candidate(current_user: User = Depends(get_current_active_user)) -> User:
+    if current_user.role != UserRole.CANDIDATE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only candidates can access this endpoint",
@@ -34,8 +35,8 @@ async def get_current_candidate(current_user: UserInDB = Depends(get_current_act
     description="Candidate uploads a live camera photo. Stored for face verification during interview (Azure Face API–ready).",
 )
 async def upload_face(
-    current_candidate: UserInDB = Depends(get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_candidate: User = Depends(get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
     photo: UploadFile = File(..., description="Live photo (image/jpeg or image/png)"),
 ):
     candidate_id = str(current_candidate.id)
@@ -49,19 +50,21 @@ async def upload_face(
     if len(image_bytes) == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty image")
     ref_id, path_or_azure_id = face_service.enroll_face(candidate_id, image_bytes, content_type)
-    coll = db[COLLECTION_NAME]
-    await coll.update_one(
-        {"candidate_id": candidate_id},
-        {
-            "$set": {
-                "face_ref_id": ref_id,
-                "face_path_or_azure_id": path_or_azure_id,
-                "face_updated_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }
-        },
-        upsert=True,
-    )
+    
+    async with UnitOfWork(session) as uow:
+        candidate = await uow.users.get_by_id(current_candidate.id)
+        if not candidate or not candidate.candidate_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate profile not found"
+            )
+        profile = candidate.candidate_profile
+        profile.face_verification_id = ref_id
+        profile.face_sample_url = path_or_azure_id
+        profile.face_verified = True
+        candidate.updated_at = datetime.now(timezone.utc)
+        await uow.flush()
+    
     return {
         "message": "Face enrolled successfully. It will be used for verification during the interview.",
         "face_ref_id": ref_id,
@@ -74,8 +77,8 @@ async def upload_face(
     description="Candidate uploads a short voice recording. Stored for voice verification during interview (Azure Speech Service–ready).",
 )
 async def upload_voice(
-    current_candidate: UserInDB = Depends(get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_candidate: User = Depends(get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
     audio: UploadFile = File(..., description="Voice recording (audio/webm, audio/wav, etc.)"),
 ):
     candidate_id = str(current_candidate.id)
@@ -89,19 +92,21 @@ async def upload_voice(
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty audio")
     ref_id, path_or_azure_id = speech_service.enroll_voice(candidate_id, audio_bytes, content_type)
-    coll = db[COLLECTION_NAME]
-    await coll.update_one(
-        {"candidate_id": candidate_id},
-        {
-            "$set": {
-                "voice_ref_id": ref_id,
-                "voice_path_or_azure_id": path_or_azure_id,
-                "voice_updated_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-            }
-        },
-        upsert=True,
-    )
+    
+    async with UnitOfWork(session) as uow:
+        candidate = await uow.users.get_by_id(current_candidate.id)
+        if not candidate or not candidate.candidate_profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Candidate profile not found"
+            )
+        profile = candidate.candidate_profile
+        profile.voice_profile_id = ref_id
+        profile.voice_sample_url = path_or_azure_id
+        profile.voice_verified = True
+        candidate.updated_at = datetime.now(timezone.utc)
+        await uow.flush()
+    
     return {
         "message": "Voice enrolled successfully. It will be used for verification during the interview.",
         "voice_ref_id": ref_id,
@@ -114,15 +119,22 @@ async def upload_voice(
     description="Returns whether the candidate has enrolled face and voice for interview verification.",
 )
 async def get_verification_status(
-    current_candidate: UserInDB = Depends(get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_candidate: User = Depends(get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
 ):
-    candidate_id = str(current_candidate.id)
-    coll = db[COLLECTION_NAME]
-    doc = await coll.find_one({"candidate_id": candidate_id})
-    return {
-        "face_enrolled": bool(doc and doc.get("face_ref_id")),
-        "voice_enrolled": bool(doc and doc.get("voice_ref_id")),
-        "face_updated_at": doc.get("face_updated_at").isoformat() if doc and doc.get("face_updated_at") else None,
-        "voice_updated_at": doc.get("voice_updated_at").isoformat() if doc and doc.get("voice_updated_at") else None,
-    }
+    async with UnitOfWork(session) as uow:
+        candidate = await uow.users.get_by_id(current_candidate.id)
+        if not candidate or not candidate.candidate_profile:
+            return {
+                "face_enrolled": False,
+                "voice_enrolled": False,
+                "face_updated_at": None,
+                "voice_updated_at": None,
+            }
+        profile = candidate.candidate_profile
+        return {
+            "face_enrolled": bool(profile.face_verification_id),
+            "voice_enrolled": bool(profile.voice_profile_id),
+            "face_updated_at": candidate.updated_at.isoformat() if profile.face_verification_id and candidate.updated_at else None,
+            "voice_updated_at": candidate.updated_at.isoformat() if profile.voice_profile_id and candidate.updated_at else None,
+        }

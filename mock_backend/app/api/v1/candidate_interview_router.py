@@ -1,5 +1,5 @@
 """
-Candidate Interview Router
+Candidate Interview Router (Refactored for SQLAlchemy)
 --------------------------
 Endpoints for candidates to view and start their assigned interviews.
 
@@ -7,36 +7,33 @@ GET  /active               – Returns scheduled/in_progress interview for the l
 POST /{interview_id}/start – Creates or resumes an interview session (generates questions from resume+JD via LLM when starting).
 """
 
-import asyncio
 import logging
-from datetime import datetime, timedelta
+import uuid
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from motor.motor_asyncio import AsyncIOMotorDatabase
-from bson import ObjectId
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_router import get_current_active_user
-from app.db.database import get_database
-from app.db.models.user import UserInDB
-from app.db.repositories.interview_repository import InterviewRepository
-from app.services.llm_question_service import generate_conversation_questions
+from app.db.sql.session import get_db_session
+from app.db.sql.models.user import User
+from app.db.sql.enums import UserRole
+from app.services.interview_sql_service import InterviewSQLService
 
 logger = logging.getLogger(__name__)
 CANDIDATE_MATERIALS_COLLECTION = "candidate_materials"
 router = APIRouter()
 
-
 # ─── Candidate auth guard ─────────────────────────────────────────────────────
 
 async def get_current_candidate(
-    current_user: UserInDB = Depends(get_current_active_user),
-) -> UserInDB:
-    if current_user.role != "candidate":
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    if current_user.role != UserRole.CANDIDATE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only candidates can access this endpoint",
         )
     return current_user
-
 
 # ─── GET /active ──────────────────────────────────────────────────────────────
 
@@ -50,61 +47,12 @@ async def get_current_candidate(
     ),
 )
 async def get_active_interview(
-    current_candidate: UserInDB = Depends(get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
-):
-    repo = InterviewRepository(db)
-    candidate_id = str(current_candidate.id)
-
-    interview = await repo.get_active_or_inprogress_for_candidate(candidate_id)
-    if not interview:
-        return None
-
-    # Interview vanishes 72 hours after scheduled time
-    scheduled_at: datetime = interview.get("scheduled_at")
-    if scheduled_at:
-        now_utc = datetime.utcnow()
-        sa_naive = scheduled_at.replace(tzinfo=None) if scheduled_at.tzinfo else scheduled_at
-        expiry_utc = sa_naive + timedelta(hours=72)
-        if now_utc > expiry_utc:
-            await repo.mark_expired(str(interview["_id"]))
-            return None
-
-    interview_id = str(interview["_id"])
-    interview_status = interview.get("status")
-
-    # ── Scheduled: compute can_start from scheduled_at ─────────────────────
-    if interview_status == "scheduled":
-        scheduled_at: datetime = interview.get("scheduled_at")
-        now_utc = datetime.utcnow()
-        # Make comparison offset-naive
-        sa_naive = scheduled_at.replace(tzinfo=None) if scheduled_at and scheduled_at.tzinfo else scheduled_at
-        can_start = sa_naive is not None and sa_naive <= now_utc
-        return {
-            "interview_id": interview_id,
-            "session_id": None,
-            "status": "scheduled",
-            "scheduled_at": scheduled_at,
-            "can_start": can_start,
-        }
-
-    # ── In-progress: return existing session_id for rejoin ─────────────────
-    if interview_status == "in_progress":
-        sessions = db.get_collection("interview_sessions")
-        session = await sessions.find_one(
-            {"interview_id": interview_id, "status": "active"}
-        )
-        session_id = str(session["_id"]) if session else None
-        return {
-            "interview_id": interview_id,
-            "session_id": session_id,
-            "status": "in_progress",
-            "scheduled_at": interview.get("scheduled_at"),
-            "can_start": True,
-        }
-
-    return None
-
+    current_candidate: User = Depends(get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
+) -> Optional[Dict[str, Any]]:
+    # ID is guaranteed by SQL to natively be UUID type on the ORM Model
+    candidate_id = current_candidate.id
+    return await InterviewSQLService.get_active_interview_for_candidate(session, candidate_id)
 
 # ─── POST /{interview_id}/start ───────────────────────────────────────────────
 
@@ -119,94 +67,18 @@ async def get_active_interview(
 )
 async def start_interview(
     interview_id: str,
-    current_candidate: UserInDB = Depends(get_current_candidate),
-    db: AsyncIOMotorDatabase = Depends(get_database),
-):
-    # Validate ObjectId
+    current_candidate: User = Depends(get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
+) -> Dict[str, Any]:
+    
+    # Strictly validate string back to purely database-agnostic UUID identifier
     try:
-        ObjectId(interview_id)
-    except Exception:
+        validated_interview_id = uuid.UUID(interview_id)
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid interview_id: {interview_id}",
+            detail=f"Invalid interview_id UUID format: {interview_id}",
         )
 
-    repo = InterviewRepository(db)
-    candidate_id = str(current_candidate.id)
-
-    interview = await repo.get_by_id(interview_id)
-    if not interview:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Interview not found",
-        )
-
-    # Ownership check
-    if interview.get("candidate_id") != candidate_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="This interview does not belong to you",
-        )
-
-    current_status = interview.get("status")
-
-    # If already in_progress → idempotent rejoin
-    if current_status == "in_progress":
-        sessions = db.get_collection("interview_sessions")
-        session = await sessions.find_one(
-            {"interview_id": interview_id, "status": "active"}
-        )
-        session_id = str(session["_id"]) if session else None
-        return {
-            "session_id": session_id,
-            "interview_id": interview_id,
-            "status": "in_progress",
-        }
-
-    # Must be scheduled to start
-    if current_status != "scheduled":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot start interview with status '{current_status}'",
-        )
-
-    # Time gate: scheduled_at must be <= now (UTC)
-    scheduled_at: datetime = interview.get("scheduled_at")
-    if scheduled_at:
-        now_utc = datetime.utcnow()
-        sa_naive = scheduled_at.replace(tzinfo=None) if scheduled_at.tzinfo else scheduled_at
-        if sa_naive > now_utc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Interview cannot be started before the scheduled time",
-            )
-
-    # Generate conversation questions from resume + JD via LLM (live when interview starts)
-    materials_coll = db[CANDIDATE_MATERIALS_COLLECTION]
-    materials = await materials_coll.find_one({"candidate_id": candidate_id})
-    resume_text = (materials or {}).get("resume_text") or ""
-    jd_text = (materials or {}).get("jd_text") or ""
-    template_id = str(interview.get("template_id") or "")
-    curated = await asyncio.to_thread(
-        generate_conversation_questions,
-        resume_text,
-        jd_text,
-        template_id or "default",
-        candidate_id,
-    )
-    if curated and curated.get("questions"):
-        await db.get_collection("interviews").update_one(
-            {"_id": ObjectId(interview_id)},
-            {"$set": {"curated_questions": curated, "updated_at": datetime.utcnow()}},
-        )
-        logger.info("Updated interview %s with %d LLM-generated conversation questions", interview_id, len(curated["questions"]))
-    else:
-        logger.info("No LLM questions generated for interview %s (using existing curated_questions)", interview_id)
-
-    # Create / return session
-    result = await repo.start_interview(interview_id, candidate_id)
-    return {
-        "session_id": result["session_id"],
-        "interview_id": interview_id,
-        "status": "in_progress",
-    }
+    candidate_id = current_candidate.id
+    return await InterviewSQLService.start_interview(session, validated_interview_id, candidate_id)

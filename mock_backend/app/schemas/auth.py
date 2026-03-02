@@ -31,3 +31,26 @@ class CandidateResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class AdminProfilePayload(BaseModel):
+    first_name: str
+    last_name: str
+    department: str
+    designation: str
+
+class AdminRegistrationRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    profile: AdminProfilePayload
+
+class AdminResponse(BaseModel):
+    id: str
+    username: str
+    email: str
+    is_active: bool
+    created_at: datetime
+    role: str
+
+    class Config:
+        from_attributes = True

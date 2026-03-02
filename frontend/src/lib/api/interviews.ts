@@ -136,6 +136,7 @@ export interface InterviewSummaryItem {
     candidate_id: string;
     status: string;
     scheduled_at: string | null;
+    overall_score: number | null;
 }
 
 export async function fetchInterviewSummary(): Promise<InterviewSummaryItem[]> {
@@ -154,6 +155,8 @@ export interface ActiveInterviewResponse {
     status: 'scheduled' | 'in_progress';
     scheduled_at: string | null;
     can_start: boolean;
+    face_verified?: boolean;
+    voice_verified?: boolean;
 }
 
 export async function fetchActiveInterview(): Promise<ActiveInterviewResponse | null> {
