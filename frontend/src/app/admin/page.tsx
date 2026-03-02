@@ -80,6 +80,18 @@ function ResumeStatusBadge({ status }: { status?: string | null }) {
     );
 }
 
+function MatchScoreBadge({ score }: { score?: number | null }) {
+    if (score == null) return <span className="text-gray-300 text-xs">-</span>;
+    const style = score >= 85 ? 'bg-green-100 text-green-800' :
+        score >= 70 ? 'bg-yellow-100 text-yellow-800' :
+            'bg-red-100 text-red-800';
+    return (
+        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${style}`}>
+            {score.toFixed(1)}
+        </span>
+    );
+}
+
 // --- Main page ------------------------------------------------------------------
 
 export default function AdminDashboardPage() {
@@ -93,6 +105,8 @@ export default function AdminDashboardPage() {
     const [limit, setLimit] = useState(10);
     const [offset, setOffset] = useState(0);
     const [search, setSearch] = useState('');
+    const [sortBy, setSortBy] = useState('created_at');
+    const [order, setOrder] = useState('desc');
 
     const [statsLoading, setStatsLoading] = useState(true);
     const [candidatesLoading, setCandidatesLoading] = useState(true);
@@ -133,7 +147,7 @@ export default function AdminDashboardPage() {
         if (isAuthenticated) {
             fetchCandidates();
         }
-    }, [isAuthenticated, limit, offset, search]);
+    }, [isAuthenticated, limit, offset, search, sortBy, order]);
 
     const fetchStats = async () => {
         setStatsLoading(true);
@@ -163,7 +177,9 @@ export default function AdminDashboardPage() {
             const params = new URLSearchParams({
                 limit: limit.toString(),
                 offset: offset.toString(),
-                search: search
+                search: search,
+                sort_by: sortBy,
+                order: order
             });
 
             const [candidatesRes, summaryRes] = await Promise.all([
@@ -455,17 +471,34 @@ export default function AdminDashboardPage() {
                     <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-white flex-wrap gap-4">
                         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
                             <h2 className="text-lg font-semibold text-gray-900">Registered Candidates ({totalCandidates})</h2>
-                            <div className="relative">
-                                <span className="absolute inset-y-0 left-0 flex items-center pl-3">
-                                    <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                                </span>
-                                <input
-                                    type="text"
-                                    placeholder="Search candidates..."
-                                    value={search}
-                                    onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
-                                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
-                                />
+                            <div className="flex items-center gap-2">
+                                <div className="relative">
+                                    <span className="absolute inset-y-0 left-0 flex items-center pl-3">
+                                        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                    </span>
+                                    <input
+                                        type="text"
+                                        placeholder="Search candidates..."
+                                        value={search}
+                                        onChange={(e) => { setSearch(e.target.value); setOffset(0); }}
+                                        className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
+                                    />
+                                </div>
+                                <select
+                                    value={`${sortBy}:${order}`}
+                                    onChange={(e) => {
+                                        const [s, o] = e.target.value.split(':');
+                                        setSortBy(s);
+                                        setOrder(o);
+                                        setOffset(0);
+                                    }}
+                                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="created_at:desc">Newest First</option>
+                                    <option value="match_score:desc">Match Score (High → Low)</option>
+                                    <option value="match_score:asc">Match Score (Low → High)</option>
+                                    <option value="username:asc">Name (A-Z)</option>
+                                </select>
                             </div>
                         </div>
                         <button onClick={fetchCandidates} disabled={candidatesLoading} className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 flex items-center gap-1">
@@ -481,8 +514,10 @@ export default function AdminDashboardPage() {
                                     <th className="px-6 py-3 text-left">Name</th>
                                     <th className="px-6 py-3 text-left">Email</th>
                                     <th className="px-6 py-3 text-left">Resume Status</th>
+                                    <th className="px-6 py-3 text-left">Match Score</th>
                                     <th className="px-6 py-3 text-left">Interview Status</th>
-                                    <th className="px-6 py-3 text-left">Score</th>
+                                    <th className="px-6 py-3 text-left">Interview Score</th>
+                                    <th className="px-6 py-3 text-left">Hiring Signal</th>
                                     <th className="px-6 py-3 text-left">Scheduled At</th>
                                     <th className="px-6 py-3 text-left">Login</th>
                                     <th className="px-6 py-3 text-right">Actions</th>
@@ -506,6 +541,7 @@ export default function AdminDashboardPage() {
                                                 <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap">{candidate.username}</td>
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap">{candidate.email}</td>
                                                 <td className="px-6 py-4"><ResumeStatusBadge status={candidate.parse_status} /></td>
+                                                <td className="px-6 py-4"><MatchScoreBadge score={candidate.match_score} /></td>
                                                 <td className="px-6 py-4"><InterviewStatusBadge status={ivStatus} /></td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     {s?.overall_score != null ? (
@@ -518,6 +554,13 @@ export default function AdminDashboardPage() {
                                                     ) : (
                                                         <span className="text-gray-300 text-xs">-</span>
                                                     )}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    {(candidate.match_score != null && s?.overall_score != null) ? (
+                                                        <span className="font-bold text-gray-900 bg-gray-100 px-2 py-1 rounded">
+                                                            {(candidate.match_score * 0.6 + s.overall_score * 0.4).toFixed(1)}%
+                                                        </span>
+                                                    ) : <span className="text-gray-300 text-xs">-</span>}
                                                 </td>
                                                 <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
                                                     {s?.scheduled_at ? new Date(s.scheduled_at).toLocaleString() : '-'}

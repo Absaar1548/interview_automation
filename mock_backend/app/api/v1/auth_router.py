@@ -311,12 +311,14 @@ async def get_all_candidates(
     limit: int = 10,
     offset: int = 0,
     search: str = "",
+    sort_by: str = "created_at",
+    order: str = "desc",
     current_admin: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_db_session)
 ):
     try:
         from sqlalchemy.orm import selectinload
-        from sqlalchemy import func, or_
+        from sqlalchemy import func, or_, nulls_last
         from app.db.sql.models.user import CandidateProfile
         
         async with UnitOfWork(session) as uow:
@@ -335,8 +337,21 @@ async def get_all_candidates(
                     )
                 )
 
+            # Apply sorting
+            sort_field = User.created_at
+            if sort_by == "match_score":
+                query = query.outerjoin(User.candidate_profile)
+                sort_field = CandidateProfile.match_score
+            elif sort_by == "username":
+                sort_field = User.username
+
+            if order == "desc":
+                query = query.order_by(nulls_last(sort_field.desc()))
+            else:
+                query = query.order_by(nulls_last(sort_field.asc()))
+
             # Eagerly load candidate_profile to avoid lazy loading issues
-            stmt = query.options(selectinload(User.candidate_profile)).order_by(User.created_at.desc()).offset(offset).limit(limit)
+            stmt = query.options(selectinload(User.candidate_profile)).offset(offset).limit(limit)
             result = await session.execute(stmt)
             users = result.scalars().all()
             
@@ -372,7 +387,8 @@ async def get_all_candidates(
                     parse_status=u.candidate_profile.parse_status if u.candidate_profile else None,
                     parsed_at=u.candidate_profile.parsed_at if u.candidate_profile else None,
                     resume_json=u.candidate_profile.resume_json if u.candidate_profile else None,
-                    jd_json=u.candidate_profile.jd_json if u.candidate_profile else None
+                    jd_json=u.candidate_profile.jd_json if u.candidate_profile else None,
+                    match_score=u.candidate_profile.match_score if u.candidate_profile else None
                 )
                 candidates.append(c)
                 

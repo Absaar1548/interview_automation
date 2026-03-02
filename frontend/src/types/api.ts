@@ -126,6 +126,7 @@ export interface CandidateResponse {
     parsed_at?: string | null;
     resume_json?: any;
     jd_json?: any;
+    match_score?: number | null;
 }
 
 export interface ToggleLoginResponse {

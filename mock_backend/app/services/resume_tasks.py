@@ -6,6 +6,7 @@ from app.db.sql.session import AsyncSessionLocal
 from app.db.sql.unit_of_work import UnitOfWork
 from app.db.sql.models.user import User, CandidateProfile
 from app.services.resume_jd_parser import resume_jd_parser
+from app.services.match_score_service import calculate_match_score
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,10 @@ async def parse_candidate_resume(candidate_id: uuid.UUID):
                 
                 profile.resume_json = resume_json
                 profile.jd_json = jd_json
+                
+                # Deterministic match scoring
+                profile.match_score = calculate_match_score(resume_json, jd_json)
+                
                 profile.parse_status = "success"
                 profile.parsed_at = datetime.now(timezone.utc)
                 

@@ -56,6 +56,7 @@ class CandidateProfile(Base):
     resume_path: Mapped[str] = mapped_column(String, nullable=True)
     resume_json: Mapped[dict] = mapped_column(JSON, nullable=True)
     jd_json: Mapped[dict] = mapped_column(JSON, nullable=True)
+    match_score: Mapped[float] = mapped_column(nullable=True)
     parse_status: Mapped[str] = mapped_column(String, default="pending")
     parsed_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     
