@@ -3,12 +3,14 @@ import subprocess
 import sys
 import uuid
 
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy import text, select, literal
 
 # Use the same settings as the application so we always target the correct DB.
 from app.core.config import settings
 from app.core.security import get_password_hash
+from app.db.sql.unit_of_work import UnitOfWork
+from app.db.sql.models.interview_template import InterviewTemplate, TemplateQuestion
 
 
 def run_migrations():
@@ -65,6 +67,58 @@ async def seed():
     print("   Username : admin")
     print("   Password : admin")
     print("   Email    : admin@example.com")
+
+    print("Checking for existing interview templates...")
+    async with AsyncSession(engine) as session:
+        async with UnitOfWork(session) as uow:
+            stmt = (
+                select(literal(1))
+                .select_from(InterviewTemplate)
+                .where(InterviewTemplate.is_active == True)
+                .limit(1)
+            )
+            result = await uow.session.execute(stmt)
+            already_exists = result.scalar() is not None
+
+            if already_exists:
+                print("[template_seed] Active template already exists. Skipping seed.")
+            else:
+                print("[template_seed] No active templates found. Creating default template...")
+                template = InterviewTemplate(
+                    title="Default Data Science Interview",
+                    description="Baseline template with coding + conversational questions",
+                    is_active=True,
+                    settings={"total_duration_sec": 3600},
+                )
+                uow.session.add(template)
+                await uow.session.flush()
+
+                questions = [
+                    TemplateQuestion(
+                        template_id=template.id,
+                        question_text="Explain a machine learning project you worked on.",
+                        question_type="CONVERSATIONAL",
+                        time_limit_sec=120,
+                        order=1,
+                    ),
+                    TemplateQuestion(
+                        template_id=template.id,
+                        question_text="Write a SQL query to find the second highest salary.",
+                        question_type="CODING",
+                        time_limit_sec=300,
+                        order=2,
+                    ),
+                    TemplateQuestion(
+                        template_id=template.id,
+                        question_text="How do you handle model overfitting?",
+                        question_type="CONVERSATIONAL",
+                        time_limit_sec=120,
+                        order=3,
+                    ),
+                ]
+                uow.session.add_all(questions)
+                print("[template_seed] Default template created successfully.")
+
     await engine.dispose()
 
 

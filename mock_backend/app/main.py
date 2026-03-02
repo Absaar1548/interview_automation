@@ -9,7 +9,6 @@ from app.api.v1 import verification_router
 
 from contextlib import asynccontextmanager
 from app.db.sql.session import AsyncSessionLocal, test_database_connection
-from app.services.template_seed_service import ensure_default_template_exists
 import logging
  
 # Configure logging
@@ -24,14 +23,6 @@ async def lifespan(app: FastAPI):
     # ── Step 1: Verify database connectivity ──────────────────────────────────
     logger.info("Initializing application and checking database connection...")
     await test_database_connection()
-
-    # ── Step 2: Seed default template if none exist ───────────────────────────
-    logger.info("Running template seed check...")
-    try:
-        async with AsyncSessionLocal() as session:
-            await ensure_default_template_exists(session)
-    except Exception as e:
-        logger.error("[template_seed] Seed failed (non-fatal): %s", e)
 
     yield
     # ── Shutdown ──────────────────────────────────────────────────────────────
