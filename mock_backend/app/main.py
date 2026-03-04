@@ -6,6 +6,8 @@ from app.api.v1 import candidate_interview_router
 from app.api.v1 import candidate_profile_router
 from app.api.v1 import session_router
 from app.api.v1 import verification_router
+from app.api.v1 import coding_router
+from app.api.v1 import technical_router
 
 from contextlib import asynccontextmanager
 from app.db.sql.session import AsyncSessionLocal, test_database_connection
@@ -62,6 +64,8 @@ app.include_router(candidate_interview_router.router, prefix="/api/v1/candidate/
 app.include_router(candidate_profile_router.router, prefix="/api/v1/candidate", tags=["Candidate Profile (Face/Voice)"])
 app.include_router(session_router.router, prefix="/api/v1", tags=["Session"])
 app.include_router(verification_router.router, prefix="/api/v1/verification", tags=["Verification"])
+app.include_router(coding_router.router, prefix="/api/v1/coding", tags=["Coding"])
+app.include_router(technical_router.router, prefix="/api/v1/technical", tags=["Technical Questions"])
 
 @app.get("/")
 async def root():

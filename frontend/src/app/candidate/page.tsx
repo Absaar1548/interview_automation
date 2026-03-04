@@ -155,7 +155,7 @@ export default function CandidatePage() {
     // ─── Start / Rejoin interview ────────────────────────────────────────────
     const handleStart = async () => {
         if (!interview) return;
-        
+
         // Check verification status before starting
         if (!verificationStatus?.can_start_interview) {
             setError('Please complete identity verification (upload photo and voice sample) before starting the interview.');
@@ -179,7 +179,7 @@ export default function CandidatePage() {
             const jwt = getJwt();
             initializeInterview(sessionId, jwt);
 
-            router.push('/interview');
+            router.push('/coding');
         } catch (err: any) {
             const apiErr = err as SchedulingApiError;
             if (apiErr.status === 401 || apiErr.status === 403) {
@@ -270,7 +270,7 @@ export default function CandidatePage() {
                                 isUploading={uploading.audio}
                                 isVerified={verificationStatus?.voice_verified || false}
                             />
-                            
+
                             {verificationStatus?.can_start_interview && (
                                 <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 flex items-center gap-2">
                                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
@@ -356,7 +356,7 @@ export default function CandidatePage() {
                                             </span>
                                         ) : (
                                             <span>
-                                                {!verificationStatus?.can_start_interview 
+                                                {!verificationStatus?.can_start_interview
                                                     ? "Please complete identity verification (upload photo and voice sample) before starting the interview."
                                                     : "Please wait for the scheduled time to start the interview."
                                                 }
