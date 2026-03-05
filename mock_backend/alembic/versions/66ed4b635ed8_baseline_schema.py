@@ -41,7 +41,7 @@ def upgrade() -> None:
     sa.Column('category', sa.Enum('PYTHON', 'SQL', 'MACHINE_LEARNING', 'DATA_STRUCTURES', 'SYSTEM_DESIGN', 'STATISTICS', name='categoryenum'), nullable=False),
     sa.Column('difficulty', sa.Enum('EASY', 'MEDIUM', 'HARD', name='difficultyenum'), nullable=False),
     sa.Column('tags', sa.JSON(), nullable=True),
-    sa.Column('is_active', sa.Boolean(), server_default=sa.text('true()'), nullable=False),
+    sa.Column('is_active', sa.Boolean(), server_default=sa.text('true'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id')
