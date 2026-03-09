@@ -1,4 +1,5 @@
 import uuid
+import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException, status
@@ -9,6 +10,8 @@ from app.db.sql.enums import InterviewStatus
 from app.db.sql.models.interview_session import InterviewSession
 from app.db.sql.models.interview_session_question import InterviewSessionQuestion
 from app.db.sql.models.question import Question
+
+logger = logging.getLogger(__name__)
 
 class InterviewSQLService:
     @staticmethod
@@ -221,42 +224,57 @@ class InterviewSQLService:
 
             order_idx = 1
             
-            # 1. ADD TECHNICAL AND CONVERSATIONAL QUESTIONS FROM curated_questions
+            # 1. ADD TECHNICAL QUESTIONS FROM curated_questions
+            # NOTE: Conversational questions are NOT created here - they are generated LIVE
+            # when the candidate enters the conversational section, based on their projects
             if interview.curated_questions and 'questions' in interview.curated_questions:
                 questions_list = interview.curated_questions['questions']
-                conv_round = 1
                 for q_data in questions_list:
                     q_type = q_data.get('question_type', 'technical')
+                    # Normalize question_type: 'static' -> 'technical'
+                    if q_type == 'static':
+                        q_type = 'technical'
                     custom_text = q_data.get('prompt') or q_data.get('question_text') or q_data.get('text', '')
                     
+                    # Skip conversational questions - they will be generated live during interview
                     if q_type == 'conversational':
-                        session_question = InterviewSessionQuestion(
-                            id=uuid.uuid4(),
-                            interview_session_id=new_session.id,
-                            section_id=section_map["conversational"],
-                            question_type="conversational",
-                            conversation_round=conv_round,
-                            custom_text=custom_text,
-                            order=order_idx
-                        )
-                        uow.session.add(session_question)
-                        conv_round += 1
-                        order_idx += 1
-                    else:
+                        logger.info(f"[start_interview] Skipping conversational question from curated_questions - will be generated live")
+                        continue
+                    
+                    # Only process technical questions here
+                    if q_type == 'technical':
+                        # For technical questions, check if question_id exists in database
                         question_id = None
                         if 'question_id' in q_data:
                             try:
-                                question_id = uuid.UUID(q_data['question_id'])
-                            except:
+                                parsed_id = uuid.UUID(q_data['question_id'])
+                                # Verify the question actually exists in the database
+                                question_check = await uow.session.get(Question, parsed_id)
+                                if question_check:
+                                    question_id = parsed_id
+                            except (ValueError, TypeError):
+                                # Invalid UUID format, ignore
                                 question_id = None
+                        
+                        # If question_id doesn't exist, use custom_text instead
+                        # This handles LLM-generated questions that don't have database entries
+                        # The constraint requires: (question_type='technical' AND question_id IS NOT NULL) OR (custom_text IS NOT NULL)
+                        # So if question_id is None, we MUST have custom_text
+                        if not question_id:
+                            # Ensure custom_text is set - use prompt/question_text or fallback to question_id string
+                            if not custom_text:
+                                custom_text = q_data.get('prompt', '') or q_data.get('question_text', '') or q_data.get('text', '') or str(q_data.get('question_id', ''))
+                            # If still empty, use a default
+                            if not custom_text:
+                                custom_text = "Technical question"
                         
                         session_question = InterviewSessionQuestion(
                             id=uuid.uuid4(),
                             interview_session_id=new_session.id,
                             section_id=section_map["technical"],
                             question_type="technical",
-                            question_id=question_id,
-                            custom_text=custom_text if not question_id else None,
+                            question_id=question_id,  # Will be None for LLM-generated questions
+                            custom_text=custom_text if not question_id else None,  # Use custom_text if no valid question_id
                             order=order_idx
                         )
                         uow.session.add(session_question)
@@ -282,11 +300,15 @@ class InterviewSQLService:
                             uow.session.add(session_q)
                             order_idx += 1
                         elif isinstance(item, ConversationalRoundItem):
+                            # ConversationalRoundItem doesn't have pre-generated questions,
+                            # they are generated live during the interview
+                            # But we still need to create a placeholder with custom_text to satisfy constraints
                             session_q = InterviewSessionQuestion(
                                 interview_session_id=new_session.id,
                                 section_id=section_map["conversational"],
                                 question_type="conversational",
                                 conversation_round=item.conversation_round,
+                                custom_text=f"Conversational question round {item.conversation_round}",  # Set custom_text to satisfy constraint
                                 order=order_idx,
                             )
                             uow.session.add(session_q)

@@ -1,5 +1,6 @@
 import uuid
 import datetime
+from typing import Optional
 from sqlalchemy import String, DateTime, Integer, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,7 +14,7 @@ class InterviewSession(Base):
     interview_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interviews.id", ondelete="CASCADE"), nullable=False)
     candidate_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
-    current_section_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interview_session_sections.id", ondelete="SET NULL"), nullable=True)
+    current_section_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("interview_session_sections.id", ondelete="SET NULL"), nullable=True)
     
     status: Mapped[str] = mapped_column(String, default="active")
     

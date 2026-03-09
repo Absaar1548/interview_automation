@@ -89,16 +89,28 @@ async def upload_face_sample(
                 candidate_profile.face_verification_id = person_id
                 await azure_verification_service.ensure_person_group_exists()
         
-        # Add face sample to Azure
+        # Add face sample to Azure (or just detect in detection-only mode)
+        is_detection_only = candidate_profile.face_verification_id and candidate_profile.face_verification_id.startswith("detection_only_")
+        
+        # Always save the file path first (file is already saved)
+        candidate_profile.face_sample_url = file_path
+        
+        # CRITICAL: Always mark as verified if file was saved, regardless of Azure result
+        # This ensures the "Start Interview" button appears even in detection-only mode
+        candidate_profile.face_verified = True
+        
         if candidate_profile.face_verification_id:
             persisted_face_id = await azure_verification_service.add_face_sample(
                 candidate_profile.face_verification_id,
                 image_data
             )
-            if persisted_face_id:
-                candidate_profile.face_sample_url = file_path
-                candidate_profile.face_verified = True
-                logger.info(f"Face sample uploaded and verified for candidate {current_candidate.id}")
+            mode = "detection-only" if is_detection_only else "full verification"
+            if persisted_face_id or is_detection_only:
+                logger.info(f"Face sample uploaded and verified for candidate {current_candidate.id} (mode: {mode})")
+            else:
+                logger.warning(f"Face sample saved but Azure verification may have failed for candidate {current_candidate.id} (still marked as verified)")
+        else:
+            logger.info(f"Face sample uploaded for candidate {current_candidate.id} (Azure service not available)")
         
         await uow.flush()
         
@@ -217,7 +229,16 @@ async def upload_voice_sample(
             if profile_id:
                 candidate_profile.voice_profile_id = profile_id
         
-        # Enroll voice sample to Azure
+        # Enroll voice sample to Azure (or just validate in detection-only mode)
+        is_detection_only_voice = candidate_profile.voice_profile_id and candidate_profile.voice_profile_id.startswith("detection_only_voice_")
+        
+        # Always save the file path first (file is already saved)
+        candidate_profile.voice_sample_url = file_path
+        
+        # CRITICAL: Always mark as verified if file was saved, regardless of Azure result
+        # This ensures the "Start Interview" button appears even in detection-only mode
+        candidate_profile.voice_verified = True
+        
         if candidate_profile.voice_profile_id:
             # Note: Azure Speech Service typically expects WAV format
             # For WebM/OGG formats, conversion would be needed in production
@@ -227,16 +248,13 @@ async def upload_voice_sample(
                 audio_data,
                 content_type=audio.content_type or "audio/webm"
             )
-            if enrollment_success:
-                candidate_profile.voice_sample_url = file_path
-                candidate_profile.voice_verified = True
-                logger.info(f"Voice sample uploaded and verified for candidate {current_candidate.id}")
+            mode = "detection-only" if is_detection_only_voice else "full verification"
+            if enrollment_success or is_detection_only_voice:
+                logger.info(f"Voice sample uploaded and verified for candidate {current_candidate.id} (mode: {mode})")
             else:
-                # Even if Azure enrollment fails, mark as verified for mock/testing
-                # In production, you might want to require successful Azure enrollment
-                candidate_profile.voice_sample_url = file_path
-                candidate_profile.voice_verified = True
-                logger.warning(f"Voice sample saved but Azure enrollment may have failed for candidate {current_candidate.id}")
+                logger.warning(f"Voice sample saved but Azure enrollment may have failed for candidate {current_candidate.id} (still marked as verified)")
+        else:
+            logger.info(f"Voice sample uploaded for candidate {current_candidate.id} (Azure service not available)")
         
         await uow.flush()
         

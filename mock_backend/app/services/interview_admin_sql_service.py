@@ -89,6 +89,14 @@ class InterviewAdminSQLService:
                 resume_json = getattr(candidate.candidate_profile, "resume_json", None)
                 jd_json = getattr(candidate.candidate_profile, "jd_json", None)
 
+            print("\n" + "="*80)
+            print("📅 SCHEDULING INTERVIEW - Generating Questions")
+            print("="*80)
+            print(f"👤 Candidate: {candidate.username} (ID: {candidate_id})")
+            print(f"📋 Template ID: {template_id}")
+            print(f"⏰ Scheduled At: {scheduled_at}")
+            print("="*80)
+            
             curated_questions = await question_generator_service.generate_curated_questions(
                 session=session,
                 template_id=str(template_id),
@@ -99,6 +107,34 @@ class InterviewAdminSQLService:
                 resume_json=resume_json,
                 jd_json=jd_json,
             )
+            
+            # Debug: Print what we got
+            print(f"\n🔍 DEBUG: Checking generated questions...")
+            print(f"   curated_questions is None: {curated_questions is None}")
+            if curated_questions:
+                print(f"   curated_questions type: {type(curated_questions)}")
+                print(f"   curated_questions keys: {list(curated_questions.keys()) if isinstance(curated_questions, dict) else 'N/A'}")
+                questions_list = curated_questions.get('questions', []) if isinstance(curated_questions, dict) else []
+                print(f"   questions_list type: {type(questions_list)}")
+                print(f"   questions_list length: {len(questions_list) if questions_list else 0}")
+                if questions_list:
+                    print(f"   First question: {questions_list[0] if len(questions_list) > 0 else 'N/A'}")
+            else:
+                questions_list = []
+            
+            # Validate that we have at least one question
+            if not curated_questions or not questions_list or len(questions_list) == 0:
+                print("\n❌ ERROR: No questions generated!")
+                print(f"   curated_questions: {curated_questions}")
+                print(f"   questions_list: {questions_list}")
+                print("="*80)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Interview must contain at least one question. Failed to generate questions from question bank or LLM."
+                )
+            
+            print(f"\n✅ Interview scheduled successfully with {len(questions_list)} questions")
+            print("="*80 + "\n")
 
             # 6. Create Interview record
             interview = Interview(

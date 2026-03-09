@@ -467,3 +467,23 @@ async def proctoring_event(
         payload.get("event_type"),
     )
     return {"acknowledged": True}
+
+
+@router.post("/session/complete")
+async def complete_interview(
+    x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    Allow candidate to submit/complete the interview at any time.
+    Marks the interview session as completed and redirects to thank you page.
+    """
+    if not x_interview_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
+    
+    session_id = validate_uuid(x_interview_id)
+    result = await InterviewSessionSQLService.complete_session(session, session_id, current_user.id)
+    
+    logger.info(f"[complete_interview] Session {session_id} completed by candidate {current_user.id}")
+    return result

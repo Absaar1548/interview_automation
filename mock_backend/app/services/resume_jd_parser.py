@@ -120,19 +120,29 @@ class ResumeJDParser:
         
         try:
             system_prompt = """You are an expert job description parser. Extract structured information from the job description.
+Focus on extracting ALL technical skills, programming languages, frameworks, tools, and technologies required.
+
 Return ONLY valid JSON with this exact structure:
 {
     "job_title": "Job Title",
     "location": "Location if mentioned",
-    "required_skills": ["skill1", "skill2", ...],
+    "required_skills": ["skill1", "skill2", ...],  // IMPORTANT: Extract ALL technical skills mentioned
     "responsibilities": ["responsibility1", "responsibility2", ...],
     "requirements": ["requirement1", "requirement2", ...],
     "experience_required": <number of years>,
     "education_required": ["degree1", "degree2"],
     "preferred_qualifications": ["qual1", "qual2"],
-    "technologies": ["tech1", "tech2"],
+    "technologies": ["tech1", "tech2"],  // All technologies, frameworks, tools mentioned
     "industry": "Industry if mentioned"
-}"""
+}
+
+IMPORTANT: In "required_skills" and "technologies" arrays, include:
+- Programming languages (Python, Java, JavaScript, etc.)
+- Frameworks (React, Django, Flask, etc.)
+- Databases (PostgreSQL, MySQL, MongoDB, etc.)
+- Tools (Docker, Kubernetes, AWS, etc.)
+- Technologies (Machine Learning, AI, etc.)
+- Any technical skills mentioned in requirements, responsibilities, or preferred qualifications"""
 
             user_prompt = f"""Parse the following job description and extract all relevant information:
 

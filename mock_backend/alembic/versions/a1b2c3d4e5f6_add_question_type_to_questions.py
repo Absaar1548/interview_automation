@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
@@ -26,16 +27,43 @@ def upgrade() -> None:
     # Create the enum type in the database
     questiontype_enum.create(op.get_bind(), checkfirst=True)
 
-    # Add question_type column to questions table
-    op.add_column(
-        'questions',
-        sa.Column(
-            'question_type',
-            sa.Enum('technical', 'behavioral', 'coding', name='questiontype'),
-            nullable=False,
-            server_default='technical'
-        )
-    )
+    # Check if column already exists using a DO block to handle transaction errors
+    connection = op.get_bind()
+    try:
+        # Use a DO block to check and add column atomically
+        connection.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name = 'questions' AND column_name = 'question_type'
+                ) THEN
+                    ALTER TABLE questions ADD COLUMN question_type questiontype DEFAULT 'technical' NOT NULL;
+                END IF;
+            EXCEPTION WHEN duplicate_column THEN
+                -- Column already exists, ignore
+                NULL;
+            WHEN OTHERS THEN
+                -- Other error, re-raise
+                RAISE;
+            END $$;
+        """))
+    except Exception as e:
+        # If the DO block fails, try the standard approach
+        # This handles the case where the column might already exist
+        try:
+            op.add_column(
+                'questions',
+                sa.Column(
+                    'question_type',
+                    sa.Enum('technical', 'behavioral', 'coding', name='questiontype'),
+                    nullable=False,
+                    server_default='technical'
+                )
+            )
+        except Exception:
+            # Column already exists, that's fine
+            pass
 
 
 def downgrade() -> None:

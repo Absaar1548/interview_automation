@@ -59,15 +59,17 @@ async function parseError(res: Response): Promise<SchedulingApiError> {
 // ─── Templates ───────────────────────────────────────────────────────────────
 
 export async function previewTemplate(
-    templateId: string
+    templateId: string,
+    candidateId?: string
 ): Promise<TemplatePreviewResponse> {
-    const res = await fetch(
-        `${BASE_URL}/api/v1/admin/interviews/templates/${templateId}/preview`,
-        {
-            method: 'POST',
-            headers: authHeaders(),
-        }
-    );
+    const url = new URL(`${BASE_URL}/api/v1/admin/interviews/templates/${templateId}/preview`);
+    if (candidateId) {
+        url.searchParams.append('candidate_id', candidateId);
+    }
+    const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: authHeaders(),
+    });
     if (!res.ok) throw await parseError(res);
     return res.json();
 }
@@ -204,6 +206,53 @@ export async function startInterview(
         {
             method: 'POST',
             headers: authHeaders(),
+        }
+    );
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+}
+
+// ─── Interview Questions Management ───────────────────────────────────────────────
+
+export interface InterviewQuestion {
+    question_id: string;
+    question_type: 'static' | 'conversational' | 'coding';
+    order: number;
+    prompt: string;
+    difficulty: 'easy' | 'medium' | 'hard';
+    time_limit_sec: number;
+    evaluation_mode?: string;
+    source?: string;
+    [key: string]: any; // Allow extra fields
+}
+
+export interface InterviewQuestionsResponse {
+    questions: InterviewQuestion[];
+}
+
+export async function getInterviewQuestions(
+    interviewId: string
+): Promise<InterviewQuestionsResponse> {
+    const res = await fetch(
+        `${BASE_URL}/api/v1/admin/interviews/${interviewId}/questions`,
+        {
+            headers: authHeaders(),
+        }
+    );
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+}
+
+export async function updateInterviewQuestions(
+    interviewId: string,
+    questions: InterviewQuestion[]
+): Promise<InterviewQuestionsResponse> {
+    const res = await fetch(
+        `${BASE_URL}/api/v1/admin/interviews/${interviewId}/questions`,
+        {
+            method: 'PUT',
+            headers: authHeaders(),
+            body: JSON.stringify(questions),
         }
     );
     if (!res.ok) throw await parseError(res);

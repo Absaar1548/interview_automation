@@ -70,7 +70,7 @@ export default function SectionSelector() {
                                         </div>
                                         <div>
                                             <h3 className="text-xl font-bold text-gray-900 capitalize">
-                                                {section.section_type} Section
+                                                {section.section_type === 'conversational' ? 'Project Based Question' : `${section.section_type} Section`}
                                             </h3>
                                             <div className="flex items-center gap-3 mt-1">
                                                 <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${statusColors[section.status]}`}>

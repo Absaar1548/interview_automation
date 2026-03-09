@@ -7,8 +7,27 @@ Service to interact with Azure OpenAI GPT-4o for question generation.
 import os
 import logging
 from typing import Dict, Any, List, Optional
+from pathlib import Path
 from openai import AzureOpenAI
 from app.core.config import settings
+
+# Try to load .env file if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    # Load .env file from project root (mock_backend directory)
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+        logging.getLogger(__name__).debug(f"Loaded .env file from: {env_path}")
+    else:
+        # Try parent directory (project root)
+        env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+            logging.getLogger(__name__).debug(f"Loaded .env file from: {env_path}")
+except ImportError:
+    # python-dotenv not installed, will rely on environment variables or pydantic-settings
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -23,22 +42,45 @@ class AzureOpenAIService:
     def _initialize_client(self):
         """Initialize Azure OpenAI client."""
         try:
-            azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-            api_key = os.getenv("AZURE_OPENAI_API_KEY")
+            # Try multiple environment variable names for compatibility
+            azure_endpoint = (
+                os.getenv("AZURE_OPENAI_ENDPOINT") or 
+                os.getenv("OPENAI_API_BASE") or
+                getattr(settings, "OPENAI_API_BASE", None) or
+                ""
+            )
+            api_key = (
+                os.getenv("AZURE_OPENAI_API_KEY") or 
+                os.getenv("OPENAI_API_KEY") or
+                getattr(settings, "OPENAI_API_KEY", None) or
+                ""
+            )
             api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+            
+            # Debug logging
+            logger.debug(f"Azure OpenAI Endpoint: {'***SET***' if azure_endpoint else 'NOT SET'}")
+            logger.debug(f"Azure OpenAI API Key: {'***SET***' if api_key else 'NOT SET'}")
             
             if not azure_endpoint or not api_key:
                 logger.warning("Azure OpenAI credentials not configured. Question generation will use mock data.")
+                logger.warning(f"  - AZURE_OPENAI_ENDPOINT or OPENAI_API_BASE: {'SET' if azure_endpoint else 'NOT SET'}")
+                logger.warning(f"  - AZURE_OPENAI_API_KEY or OPENAI_API_KEY: {'SET' if api_key else 'NOT SET'}")
+                logger.warning(f"  - Check your .env file in: {Path(__file__).resolve().parent.parent.parent}")
                 return None
+            
+            # Clean endpoint (remove trailing slash if present)
+            azure_endpoint = azure_endpoint.rstrip('/')
             
             self.client = AzureOpenAI(
                 azure_endpoint=azure_endpoint,
                 api_key=api_key,
                 api_version=api_version
             )
-            logger.info("Azure OpenAI client initialized successfully")
+            logger.info("✅ Azure OpenAI client initialized successfully")
+            logger.info(f"   Endpoint: {azure_endpoint}")
+            logger.info(f"   API Version: {api_version}")
         except Exception as e:
-            logger.error(f"Failed to initialize Azure OpenAI client: {e}")
+            logger.error(f"Failed to initialize Azure OpenAI client: {e}", exc_info=True)
             self.client = None
     
     def generate_conversational_questions(
@@ -74,7 +116,7 @@ class AzureOpenAIService:
                 projects=projects,
                 resume_skills=resume_data.get('skills', []),
                 jd_requirements=jd_data.get('requirements', []),
-                jd_skills=jd_data.get('required_skills', [])
+                jd_skills=jd_data.get('required_skills', []) 
             )
             
             # Call Azure OpenAI

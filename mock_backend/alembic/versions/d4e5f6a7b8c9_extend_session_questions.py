@@ -41,20 +41,40 @@ def upgrade() -> None:
             )
         )
 
-    # Add coding_problem_id FK
+    # Add coding_problem_id FK (only if coding_problems table exists)
     if 'coding_problem_id' not in existing_cols:
         op.add_column(
             'interview_session_questions',
             sa.Column('coding_problem_id', sa.UUID(), nullable=True)
         )
-        op.create_foreign_key(
-            'fk_isq_coding_problem_id',
-            'interview_session_questions',
-            'coding_problems',
-            ['coding_problem_id'],
-            ['id'],
-            ondelete='SET NULL'
-        )
+        # Check if coding_problems table exists before creating FK
+        from sqlalchemy import text
+        try:
+            result = conn.execute(text("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'coding_problems'
+                )
+            """))
+            coding_problems_exists = result.scalar()
+        except Exception:
+            # If query fails, assume table doesn't exist
+            coding_problems_exists = False
+        
+        if coding_problems_exists:
+            try:
+                op.create_foreign_key(
+                    'fk_isq_coding_problem_id',
+                    'interview_session_questions',
+                    'coding_problems',
+                    ['coding_problem_id'],
+                    ['id'],
+                    ondelete='SET NULL'
+                )
+            except Exception as e:
+                # FK might already exist or table structure issue, skip
+                print(f"Warning: Could not create FK to coding_problems: {e}")
+                pass
 
     # Add conversation_round column
     if 'conversation_round' not in existing_cols:

@@ -235,9 +235,10 @@ class RecognitionSession:
                     
                     if self._chunk_count % 10 == 0:
                         logger.debug(f"[RecognitionSession] Pushed {self._chunk_count} audio chunks")
+                        print(f"[STT AUDIO] Pushed {self._chunk_count} audio chunks ({len(audio_chunk)} bytes)", flush=True)
             except Exception as e:
                 logger.error(f"Error pushing audio chunk ({len(audio_chunk)} bytes): {e}")
-                print(f"\n[STT ERROR] Failed to push audio: {e}")
+                print(f"\n[STT ERROR] Failed to push audio: {e}", flush=True)
                 # Continue even if one chunk fails
     
     async def stop(self):

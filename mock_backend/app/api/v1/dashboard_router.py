@@ -1,7 +1,8 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct
-from typing import Dict
+from typing import Dict, Optional
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer
 
@@ -11,6 +12,7 @@ from app.db.sql.models.interview import Interview
 from app.db.sql.models.user import User
 from app.db.sql.enums import InterviewStatus, UserRole
 from app.core.config import settings
+from app.services.report_generation_service import report_generation_service
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -82,3 +84,35 @@ async def get_dashboard_stats(
         "pending": pending,
         "flagged": flagged
     }
+
+
+@router.get("/interviews/{interview_id}/report")
+async def get_interview_report(
+    interview_id: str,
+    session_id: Optional[str] = None,
+    current_admin: User = Depends(get_current_admin_from_token),
+    session: AsyncSession = Depends(get_db_session)
+) -> Dict:
+    """
+    Get comprehensive interview report with scores, feedback, and recommendations.
+    
+    Args:
+        interview_id: Interview UUID string
+        session_id: Optional session UUID string (uses latest if not provided)
+        
+    Returns:
+        Full interview report dictionary
+    """
+    try:
+        report = await report_generation_service.generate_interview_report(
+            session=session,
+            interview_id=interview_id,
+            session_id=session_id
+        )
+        return report
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error generating report: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate report")

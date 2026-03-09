@@ -45,9 +45,11 @@ def parse_resume_with_llm(resume_text: str) -> Dict[str, Any]:
     
     try:
         system_prompt = """You are an expert resume parser. Extract structured information from the resume text.
+Focus on extracting ALL technical skills, programming languages, frameworks, tools, and technologies mentioned.
+
 Return ONLY valid JSON with this exact structure:
 {
-    "skills": ["skill1", "skill2", ...],
+    "skills": ["skill1", "skill2", ...],  // IMPORTANT: Extract ALL technical skills, languages, frameworks, tools
     "years_of_experience": <number>,
     "education": {
         "degrees": ["Degree 1", "Degree 2"],
@@ -58,7 +60,7 @@ Return ONLY valid JSON with this exact structure:
         {
             "name": "Project Name",
             "description": "Project description",
-            "technologies": ["tech1", "tech2"],
+            "technologies": ["tech1", "tech2"],  // Extract all technologies used
             "duration": "Duration if mentioned"
         }
     ],
@@ -67,12 +69,21 @@ Return ONLY valid JSON with this exact structure:
             "company": "Company Name",
             "role": "Job Title",
             "duration": "Duration",
-            "responsibilities": ["responsibility1", "responsibility2"]
+            "responsibilities": ["responsibility1", "responsibility2"],
+            "technologies": ["tech1", "tech2"]  // Technologies used in this role
         }
     ],
     "certifications": ["cert1", "cert2"],
     "languages": ["language1", "language2"]
-}"""
+}
+
+IMPORTANT: In the "skills" array, include:
+- Programming languages (Python, Java, JavaScript, etc.)
+- Frameworks (React, Django, Flask, etc.)
+- Databases (PostgreSQL, MySQL, MongoDB, etc.)
+- Tools (Docker, Kubernetes, AWS, etc.)
+- Technologies (Machine Learning, AI, etc.)
+- Any technical skills mentioned anywhere in the resume"""
 
         user_prompt = f"""Parse the following resume text and extract all relevant information:
 
@@ -92,8 +103,27 @@ Return ONLY the JSON object, no additional text or markdown."""
         )
         
         parsed_json = json.loads(response.choices[0].message.content)
-        logger.info("Successfully parsed resume with LLM")
-        print(parsed_json)
+        
+        # Extract additional skills from projects and experience
+        all_skills = set(parsed_json.get('skills', []))
+        
+        # Add technologies from projects
+        for project in parsed_json.get('projects', []):
+            project_techs = project.get('technologies', [])
+            if project_techs:
+                all_skills.update(project_techs)
+        
+        # Add technologies from experience
+        for exp in parsed_json.get('experience', []):
+            exp_techs = exp.get('technologies', [])
+            if exp_techs:
+                all_skills.update(exp_techs)
+        
+        # Update skills list with all found skills
+        parsed_json['skills'] = list(all_skills)
+        
+        logger.info(f"Successfully parsed resume with LLM. Found {len(parsed_json['skills'])} skills")
+        print(f"[ResumeParser] Extracted skills: {parsed_json['skills']}")
         return parsed_json
         
     except Exception as e:

@@ -20,10 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create coding_problems, test_cases, and code_submissions tables."""
+    from sqlalchemy import inspect, text
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = {tbl for tbl in inspector.get_table_names()}
 
     # --- coding_problems -------------------------------------------------
-    op.create_table(
-        'coding_problems',
+    if 'coding_problems' not in existing_tables:
+        op.create_table(
+            'coding_problems',
         sa.Column('id', sa.Uuid(), nullable=False),
         sa.Column('question_id', sa.Uuid(), nullable=False),
         sa.Column('title', sa.String(), nullable=False),
@@ -35,11 +40,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['question_id'], ['questions.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('question_id'),
-    )
+        )
+    else:
+        print("coding_problems table already exists, skipping creation")
 
     # --- test_cases ------------------------------------------------------
-    op.create_table(
-        'test_cases',
+    if 'test_cases' not in existing_tables:
+        op.create_table(
+            'test_cases',
         sa.Column('id', sa.Uuid(), nullable=False),
         sa.Column('problem_id', sa.Uuid(), nullable=False),
         sa.Column('input', sa.Text(), nullable=False),
@@ -48,11 +56,14 @@ def upgrade() -> None:
         sa.Column('order', sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(['problem_id'], ['coding_problems.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
-    )
+        )
+    else:
+        print("test_cases table already exists, skipping creation")
 
     # --- code_submissions ------------------------------------------------
-    op.create_table(
-        'code_submissions',
+    if 'code_submissions' not in existing_tables:
+        op.create_table(
+            'code_submissions',
         sa.Column('id', sa.Uuid(), nullable=False),
         sa.Column('problem_id', sa.Uuid(), nullable=False),
         sa.Column('interview_id', sa.Uuid(), nullable=False),
@@ -68,7 +79,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['interview_id'], ['interviews.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['candidate_id'], ['users.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
-    )
+        )
+    else:
+        print("code_submissions table already exists, skipping creation")
 
 
 def downgrade() -> None:

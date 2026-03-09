@@ -85,11 +85,13 @@ export default function AnswerPanel({
 
     // Sync transcript with value when transcript updates during recording
     useEffect(() => {
-        if (transcript && transcript.trim() && isRecording) {
-            // Only update if transcript is different from current value
-            // This prevents overwriting user edits
-            if (transcript !== value) {
-                onChange(transcript);
+        if (isRecording) {
+            // Always update the value when we receive a new transcript during recording
+            // This ensures the textarea shows what the candidate is speaking in real-time
+            // Use transcript if available, otherwise keep current value
+            const displayText = transcript || value || "";
+            if (displayText !== value) {
+                onChange(displayText);
             }
         }
     }, [transcript, isRecording]); // Update when transcript changes during recording
@@ -126,14 +128,11 @@ export default function AnswerPanel({
                 onPartialTranscript: (text) => {
                     // Update transcript state with latest partial text
                     // Azure sends incremental updates, so we use the latest text directly
-                    setTranscript(text);
-                    // Update the parent value immediately so it shows in the textarea
-                    if (text && text.trim()) {
-                        onChange(text);
-                    } else if (text) {
-                        // Even if empty, update to show "Listening..."
-                        onChange(text);
-                    }
+                    console.log("[AnswerPanel] Partial transcript received:", text);
+                    setTranscript(text || "");
+                    // Always update the parent value immediately so it shows in the textarea
+                    // This ensures the candidate sees what they're speaking in real-time
+                    onChange(text || "");
                 },
                 onFinalTranscript: (text) => {
                     // Final transcript replaces everything
@@ -387,17 +386,19 @@ export default function AnswerPanel({
                 )}
                 <textarea
                     className="w-full min-h-[150px] p-4 border-0 rounded text-sm text-gray-800 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={value || transcript || ""}
+                    value={isRecording ? (transcript || value || "") : (value || transcript || "")}
                     onChange={(e) => {
-                        onChange(e.target.value);
-                        // Clear transcript state when user manually edits
-                        if (e.target.value !== transcript) {
-                            setTranscript(e.target.value);
+                        const newValue = e.target.value;
+                        onChange(newValue);
+                        // When user manually edits during recording, update transcript to match
+                        // This allows them to edit the transcribed text
+                        if (isRecording) {
+                            setTranscript(newValue);
                         }
                     }}
                     placeholder={
                         isRecording 
-                            ? "Speak your answer... Live transcription will appear here. You can also type to edit."
+                            ? "Speak your answer... Live transcription will appear here as you speak. You can also type to edit."
                             : "Click 'Start Speaking' to begin recording, or type your answer here..."
                     }
                     disabled={false}

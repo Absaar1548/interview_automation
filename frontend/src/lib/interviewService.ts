@@ -129,6 +129,20 @@ class InterviewService {
         );
     }
 
+    async completeInterview(): Promise<InterviewState> {
+        const response = await apiClient.post<{ state: InterviewState }, {}>(
+            "/api/v1/session/complete",
+            {},
+            true
+        );
+        
+        if (response.state === "COMPLETED") {
+            proctoringEngine.stop();
+        }
+        
+        return response.state;
+    }
+
     terminate(): void {
         proctoringEngine.stop();
         controlWebSocket.disconnect();

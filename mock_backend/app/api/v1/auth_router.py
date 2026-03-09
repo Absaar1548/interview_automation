@@ -298,21 +298,26 @@ async def admin_register_candidate(
         if len(resume_bytes) == 0:
             raise HTTPException(status_code=400, detail="Resume file is empty")
         
-        # Save resume and parse with LLM
-        resume_text, resume_path, parsed_data = save_resume_and_extract_text(
-            candidate_id=str(resume_id),  # Temporary ID before user creation
-            resume_id=resume_id,
-            content=resume_bytes,
-            content_type=resume.content_type or "application/pdf"
-        )
+        # Save resume file immediately (fast operation, no LLM parsing)
+        import os
+        from pathlib import Path
+        from app.services.resume_parser import extract_text_from_pdf
         
-        if not resume_path:
-            raise HTTPException(status_code=500, detail="Failed to save resume file")
+        upload_rel_dir = os.path.join("uploads", "resumes")
+        upload_dir = os.path.join(settings.BASE_DIR, upload_rel_dir)
+        os.makedirs(upload_dir, exist_ok=True)
         
-        # Store parsed JSON data
-        resume_json = None
-        if parsed_data:
-            resume_json = parsed_data
+        resume_filename = f"{resume_id}.pdf"
+        resume_path_full = os.path.join(upload_dir, resume_filename)
+        
+        # Save file immediately
+        with open(resume_path_full, "wb") as f:
+            f.write(resume_bytes)
+        
+        # Extract text from PDF (fast operation, no LLM)
+        resume_text = ""
+        if resume.content_type and "pdf" in resume.content_type:
+            resume_text = extract_text_from_pdf(resume_bytes)
         
         names = candidate_name.split(" ", 1)
         first_name = names[0]
@@ -325,37 +330,20 @@ async def admin_register_candidate(
             hashed_password=hashed_password,
         )
         
-        # Parse JD with LLM
-        from app.services.resume_jd_parser import resume_jd_parser
-        jd_parsed = resume_jd_parser.parse_job_description(job_description) if job_description else {}
-        
-        # Extract skills from parsed resume data
-        skills_list = []
-        if parsed_data and 'skills' in parsed_data:
-            skills_list = parsed_data['skills']
-        elif resume_json and 'skills' in resume_json:
-            skills_list = resume_json['skills']
-        
-        # Extract years of experience
-        experience_years = None
-        if parsed_data and 'years_of_experience' in parsed_data:
-            experience_years = parsed_data['years_of_experience']
-        elif resume_json and 'years_of_experience' in resume_json:
-            experience_years = resume_json['years_of_experience']
-        
+        # Create profile with minimal data - LLM parsing will happen in background
         profile = CandidateProfile(
             first_name=first_name,
             last_name=last_name,
             resume_id=resume_id,
-            skills=skills_list,
-            experience_years=experience_years,
+            skills=[],  # Will be populated by background task
+            experience_years=None,  # Will be populated by background task
             job_description=job_description,  # Store JD text in profile
-            resume_text=resume_text or "",  # Store parsed resume text
+            resume_text=resume_text or "",  # Store extracted text (no LLM parsing yet)
             resume_filename=resume.filename,
-            resume_path=os.path.join(upload_rel_dir, f"{resume_id}.pdf"),
-            resume_json=resume_json if resume_json else parsed_data,  # Store structured resume data
-            jd_json=jd_parsed,  # Store structured JD data
-            parse_status="completed" if parsed_data else "pending"
+            resume_path=os.path.join(upload_rel_dir, resume_filename),
+            resume_json=None,  # Will be populated by background task
+            jd_json=None,  # Will be populated by background task
+            parse_status="pending"  # Will be updated to "success" by background task
         )
         new_user.candidate_profile = profile
         
@@ -363,8 +351,13 @@ async def admin_register_candidate(
         # Flush to get the ID for response
         await uow.flush()
         
+        # Always add background task for LLM parsing (will update resume_json, jd_json, skills, etc.)
+        # This runs asynchronously after the response is returned, preventing timeout
         if background_tasks:
             background_tasks.add_task(parse_candidate_resume, new_user.id)
+        else:
+            # Fallback: This shouldn't happen in normal FastAPI flow, but log a warning
+            logger.warning(f"BackgroundTasks not available for candidate {new_user.id}, LLM parsing will be skipped")
         
         # Print credentials to terminal - Make it very visible
         separator = "="*80

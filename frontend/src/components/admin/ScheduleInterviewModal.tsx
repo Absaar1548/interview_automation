@@ -18,7 +18,7 @@ interface ScheduleInterviewModalProps {
     /** Prefill datetime for reschedule */
     existingScheduledAt?: string;
     onClose: () => void;
-    onSuccess: () => void;
+    onSuccess: (interviewId?: string) => void;
     onAuthError: () => void;
 }
 
@@ -60,7 +60,7 @@ export default function ScheduleInterviewModal({
         }
 
         setPreviewLoading(true);
-        previewTemplate(templateId)
+        previewTemplate(templateId, candidateId)
             .then((data) => {
                 // Technical questions
                 const rawQuestions = data.technical_section?.questions ?? [];
@@ -159,17 +159,18 @@ export default function ScheduleInterviewModal({
                     custom_text: q.text !== q.originalText ? q.text : undefined,
                     order: idx + 1
                 }));
-                await scheduleInterview({
+                const response = await scheduleInterview({
                     candidate_id: candidateId,
                     template_id: templateId,
                     scheduled_at: isoAt,
                     questions
                 });
+                onSuccess(response.id); // Pass interview ID to show questions modal
             } else {
                 if (!interviewId) throw new Error('Missing interview ID for reschedule');
                 await rescheduleInterview(interviewId, { scheduled_at: isoAt });
+                onSuccess();
             }
-            onSuccess();
         } catch (err: any) {
             const apiErr = err as SchedulingApiError;
             if (apiErr.status === 401 || apiErr.status === 403) {

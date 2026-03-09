@@ -25,6 +25,7 @@ interface InterviewStore {
     fetchNextQuestion: () => Promise<void>;
     submitAnswer: (payload: EvaluationSubmitRequest) => Promise<void>;
     sendProctoringEvent: (event: ProctoringEventRequest) => Promise<void>;
+    completeInterview: () => Promise<void>;
     terminate: () => void;
 
     fetchSections?: () => Promise<void>;
@@ -105,8 +106,11 @@ export const useInterviewStore = create<InterviewStore>((set, get) => ({
             if (state === "IN_PROGRESS") {
                 set({ state });
                 await get().fetchNextQuestion();
-            } else if (state === "COMPLETED" || state === "SECTION_COMPLETED") {
-                // Clear immediately to trigger UI change to SectionSelector or results
+            } else if (state === "COMPLETED") {
+                // Interview is fully completed - redirect handled by InterviewShell
+                set({ state, currentQuestion: null, currentSection: null });
+            } else if (state === "SECTION_COMPLETED") {
+                // Clear immediately to trigger UI change to SectionSelector
                 set({ state, currentQuestion: null, currentSection: null });
 
                 // Refresh sections to get latest counts and statuses
@@ -117,7 +121,7 @@ export const useInterviewStore = create<InterviewStore>((set, get) => ({
                 if (active) {
                     set({ state: "IN_PROGRESS" });
                     await get().fetchNextQuestion();
-                } else if (state === "SECTION_COMPLETED") {
+                } else {
                     set({ state: "READY" });
                 }
             } else {
@@ -139,6 +143,19 @@ export const useInterviewStore = create<InterviewStore>((set, get) => ({
             // Keeping error state consistent if meaningful.
             const errorMessage = error instanceof Error ? error.message : "Failed to send proctoring event";
             set({ error: errorMessage });
+        }
+    },
+
+    completeInterview: async () => {
+        set({ isSubmitting: true, error: null });
+        try {
+            const state = await interviewService.completeInterview();
+            set({ state: "COMPLETED" });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Failed to complete interview";
+            set({ error: errorMessage });
+        } finally {
+            set({ isSubmitting: false });
         }
     },
 

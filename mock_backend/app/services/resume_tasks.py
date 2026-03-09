@@ -27,14 +27,16 @@ async def parse_candidate_resume(candidate_id: uuid.UUID):
                 
                 profile = user.candidate_profile
                 
-                # Parse resume
+                # Parse resume with LLM
                 resume_json = None
                 if profile.resume_text:
                     try:
-                        resume_json = resume_jd_parser._extract_resume_info(profile.resume_text)
-                        resume_json['text'] = profile.resume_text
+                        from app.services.resume_parser import parse_resume_with_llm
+                        resume_json = parse_resume_with_llm(profile.resume_text)
+                        if resume_json:
+                            resume_json['text'] = profile.resume_text
                     except Exception as e:
-                        logger.error(f"Error parsing structured resume for candidate {candidate_id}: {e}")
+                        logger.error(f"Error parsing structured resume for candidate {candidate_id}: {e}", exc_info=True)
                 
                 # Parse job description
                 jd_json = None
@@ -46,6 +48,11 @@ async def parse_candidate_resume(candidate_id: uuid.UUID):
                 
                 profile.resume_json = resume_json
                 profile.jd_json = jd_json
+                
+                # Extract skills and experience from parsed data
+                if resume_json:
+                    profile.skills = resume_json.get('skills', [])
+                    profile.experience_years = resume_json.get('years_of_experience')
                 
                 # Deterministic match scoring
                 profile.match_score = calculate_match_score(resume_json, jd_json)
