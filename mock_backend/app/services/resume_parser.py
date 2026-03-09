@@ -49,13 +49,17 @@ Focus on extracting ALL technical skills, programming languages, frameworks, too
 
 Return ONLY valid JSON with this exact structure:
 {
+    "summary": "Brief professional summary (2-3 sentences)",
     "skills": ["skill1", "skill2", ...],  // IMPORTANT: Extract ALL technical skills, languages, frameworks, tools
-    "years_of_experience": <number>,
-    "education": {
-        "degrees": ["Degree 1", "Degree 2"],
-        "institutions": ["Institution 1", "Institution 2"],
-        "fields_of_study": ["Field 1", "Field 2"]
-    },
+    "experience_years": <number>,
+    "education": [
+        {
+            "degree": "Degree Name",
+            "institution": "University/School",
+            "field": "Major/Field of Study",
+            "year": "Graduation Year"
+        }
+    ],
     "projects": [
         {
             "name": "Project Name",
@@ -149,7 +153,7 @@ def _fallback_parse_resume(resume_text: str) -> Dict[str, Any]:
     
     return {
         "skills": list(set(skills)),
-        "years_of_experience": years_exp,
+        "experience_years": years_exp,
         "education": {"degrees": [], "institutions": [], "fields_of_study": []},
         "projects": [],
         "experience": [],

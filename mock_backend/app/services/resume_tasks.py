@@ -76,7 +76,7 @@ async def parse_candidate_resume(candidate_id: uuid.UUID, password: str = None):
                 # Extract skills and experience from parsed data
                 if resume_json:
                     profile.skills = resume_json.get('skills', [])
-                    profile.experience_years = resume_json.get('years_of_experience')
+                    profile.experience_years = resume_json.get('experience_years')
                 
                 # Deterministic match scoring
                 profile.match_score = calculate_match_score(resume_json, jd_json)
