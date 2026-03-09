@@ -284,40 +284,20 @@ async def admin_register_candidate(
         
         resume_id = secrets.token_hex(8)
         
-        # Save resume file and extract text using LLM parsing
-        import os
-        import json
-        from app.services.resume_parser import save_resume_and_extract_text
-        
+        # Save resume file immediately (fast operation)
         upload_rel_dir = os.path.join("uploads", "resumes")
         upload_dir = os.path.join(settings.BASE_DIR, upload_rel_dir)
         os.makedirs(upload_dir, exist_ok=True)
         
-        # Read resume content
         resume_bytes = await resume.read()
         if len(resume_bytes) == 0:
             raise HTTPException(status_code=400, detail="Resume file is empty")
         
-        # Save resume file immediately (fast operation, no LLM parsing)
-        import os
-        from pathlib import Path
-        from app.services.resume_parser import extract_text_from_pdf
-        
-        upload_rel_dir = os.path.join("uploads", "resumes")
-        upload_dir = os.path.join(settings.BASE_DIR, upload_rel_dir)
-        os.makedirs(upload_dir, exist_ok=True)
-        
         resume_filename = f"{resume_id}.pdf"
         resume_path_full = os.path.join(upload_dir, resume_filename)
         
-        # Save file immediately
         with open(resume_path_full, "wb") as f:
             f.write(resume_bytes)
-        
-        # Extract text from PDF (fast operation, no LLM)
-        resume_text = ""
-        if resume.content_type and "pdf" in resume.content_type:
-            resume_text = extract_text_from_pdf(resume_bytes)
         
         names = candidate_name.split(" ", 1)
         first_name = names[0]
@@ -330,20 +310,15 @@ async def admin_register_candidate(
             hashed_password=hashed_password,
         )
         
-        # Create profile with minimal data - LLM parsing will happen in background
+        # Create profile with minimal data - LLM parsing and email will happen in background
         profile = CandidateProfile(
             first_name=first_name,
             last_name=last_name,
             resume_id=resume_id,
-            skills=[],  # Will be populated by background task
-            experience_years=None,  # Will be populated by background task
-            job_description=job_description,  # Store JD text in profile
-            resume_text=resume_text or "",  # Store extracted text (no LLM parsing yet)
+            job_description=job_description,
             resume_filename=resume.filename,
             resume_path=os.path.join(upload_rel_dir, resume_filename),
-            resume_json=None,  # Will be populated by background task
-            jd_json=None,  # Will be populated by background task
-            parse_status="pending"  # Will be updated to "success" by background task
+            parse_status="pending"
         )
         new_user.candidate_profile = profile
         
@@ -351,40 +326,14 @@ async def admin_register_candidate(
         # Flush to get the ID for response
         await uow.flush()
         
-        # Always add background task for LLM parsing (will update resume_json, jd_json, skills, etc.)
-        # This runs asynchronously after the response is returned, preventing timeout
+        # Always add background task for parsing and email
         if background_tasks:
-            background_tasks.add_task(parse_candidate_resume, new_user.id)
+            background_tasks.add_task(parse_candidate_resume, new_user.id, password)
         else:
-            # Fallback: This shouldn't happen in normal FastAPI flow, but log a warning
-            logger.warning(f"BackgroundTasks not available for candidate {new_user.id}, LLM parsing will be skipped")
+            logger.warning(f"BackgroundTasks not available for candidate {new_user.id}")
         
-        # Print credentials to terminal - Make it very visible
-        separator = "="*80
-        print("\n\n" + separator)
-        print(" " * 25 + "🔐 CANDIDATE REGISTRATION SUCCESSFUL 🔐")
-        print(separator)
-        print(f" 📋 Candidate Name:     {candidate_name}")
-        print(f" 📧 Email:              {candidate_email}")
-        print(f" 👤 Username:           {username}")
-        print(f" 🔑 Password:           {password}")
-        print(f" 🆔 Candidate ID:       {new_user.id}")
-        print(separator)
-        print(" " * 20 + "⚠️  IMPORTANT: Save these credentials! ⚠️")
-        print(" " * 15 + "These credentials are needed for candidate login.")
-        print(separator + "\n\n")
-        
-        # Also log to logger for persistence
-        logger.info("="*80)
-        logger.info("CANDIDATE REGISTRATION SUCCESSFUL")
-        logger.info(f"Candidate Name: {candidate_name}")
-        logger.info(f"Email: {candidate_email}")
-        logger.info(f"Username: {username}")
-        logger.info(f"Password: {password}")
-        logger.info(f"Candidate ID: {new_user.id}")
-        logger.info("="*80)
-        
-        await email_service.send_candidate_password_email(candidate_email, candidate_name, password)
+        # Print credentials to terminal for local dev visibility
+        print(f"\n[REGISTRATION] Registered {candidate_email} with password: {password}\n")
         
         return CandidateResponse(
             id=str(new_user.id),

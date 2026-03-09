@@ -145,11 +145,6 @@ export default function AdminDashboardPage() {
         fetchStats();
     }, [_hasHydrated, isAuthenticated, user, router]);
 
-    useEffect(() => {
-        if (isAuthenticated) {
-            fetchCandidates();
-        }
-    }, [isAuthenticated, limit, offset, search, sortBy, order]);
 
     const fetchStats = async () => {
         setStatsLoading(true);
@@ -157,7 +152,7 @@ export default function AdminDashboardPage() {
             const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
             const currentToken = useAuthStore.getState().token;
             const authHeader: Record<string, string> = currentToken ? { 'Authorization': `Bearer ${currentToken}` } : {};
-            
+
             const res = await fetch(`${baseUrl}/api/v1/dashboard/stats`, {
                 headers: {
                     ...authHeader,
@@ -240,6 +235,23 @@ export default function AdminDashboardPage() {
         fetchStats();
         fetchCandidates();
     }, [fetchCandidates]);
+
+    useEffect(() => {
+        if (isAuthenticated) {
+            fetchCandidates();
+        }
+    }, [isAuthenticated, limit, offset, search, sortBy, order, fetchCandidates]);
+
+    // Automatically poll for updates if any candidates are currently being parsed
+    useEffect(() => {
+        const hasPending = candidates.some(c => c.parse_status === 'pending');
+        if (hasPending) {
+            const interval = setInterval(() => {
+                fetchData();
+            }, 5000); // Poll every 5 seconds (fetches both stats and candidates)
+            return () => clearInterval(interval);
+        }
+    }, [candidates, fetchData]);
 
     // --- Handlers ---------------------------------------------------------------
 
