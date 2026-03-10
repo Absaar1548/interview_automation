@@ -1201,14 +1201,49 @@ class InterviewSessionSQLService:
                     detail="Interview not yet completed",
                 )
 
-            # Use persisted score; regenerate other fields deterministically
-            mock = _generate_mock_result(interview.id)
-            return {
+            # Use report data if available, otherwise fallback to mock
+            summary = {
                 "final_score": interview.overall_score,
-                "recommendation": mock["recommendation"],
-                "fraud_risk": mock["fraud_risk"],
-                "strengths": mock["strengths"],
-                "gaps": mock["gaps"],
-                "notes": mock["notes"],
                 "completed_at": session_obj.completed_at,
             }
+            
+            if interview.report_json:
+                report = interview.report_json
+                
+                # Map recommendation decision to frontend format
+                decision_map = {
+                    "STRONG_HIRE": "PROCEED",
+                    "HIRE": "PROCEED",
+                    "CONSIDER": "REVIEW",
+                    "NO_HIRE": "REJECT"
+                }
+                
+                summary.update({
+                    "recommendation": decision_map.get(report.get("recommendation"), "REVIEW"),
+                    "fraud_risk": "LOW",  # Default if not in report
+                    "strengths": report.get("strengths", []),
+                    "gaps": report.get("weaknesses", []),
+                    "notes": report.get("recommendation_reason", "")
+                })
+                
+                # Check proctoring for risk
+                proc = report.get("proctoring_summary", {})
+                alerts = proc.get("face_verification_alerts", 0) + proc.get("voice_verification_alerts", 0)
+                if alerts > 5:
+                    summary["fraud_risk"] = "HIGH"
+                elif alerts > 1:
+                    summary["fraud_risk"] = "MEDIUM"
+                else:
+                    summary["fraud_risk"] = "LOW"
+            else:
+                # Fallback to mock if no report exists (legacy)
+                mock = _generate_mock_result(interview.id)
+                summary.update({
+                    "recommendation": mock["recommendation"],
+                    "fraud_risk": mock["fraud_risk"],
+                    "strengths": mock["strengths"],
+                    "gaps": mock["gaps"],
+                    "notes": mock["notes"],
+                })
+                
+            return summary

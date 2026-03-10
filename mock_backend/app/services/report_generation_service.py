@@ -95,9 +95,10 @@ class ReportGenerationService:
         
         # Calculate statistics
         all_scores = [r[0].ai_score for r in responses_data if r[0].ai_score is not None]
-        average_score = sum(all_scores) / len(all_scores) if all_scores else 0.0
-        max_score = max(all_scores) if all_scores else 0.0
-        min_score = min(all_scores) if all_scores else 0.0
+        avg_raw = sum(all_scores) / len(all_scores) if all_scores else 0.0
+        average_score = avg_raw * 10.0  # Convert 0-10 to 0-100
+        max_score = max(all_scores) * 10.0 if all_scores else 0.0
+        min_score = min(all_scores) * 10.0 if all_scores else 0.0
         
         # Extract strengths and weaknesses from evaluations
         strengths = []
@@ -115,7 +116,7 @@ class ReportGenerationService:
         
         # Generate recommendation
         recommendation = ReportGenerationService._generate_recommendation(
-            average_score, unique_strengths, unique_weaknesses
+            avg_raw, unique_strengths, unique_weaknesses
         )
         
         # Build question-by-question breakdown
@@ -127,7 +128,7 @@ class ReportGenerationService:
                 "question_text": question_text,
                 "question_type": getattr(q, "question_type", "technical"),
                 "answer_text": resp.answer_text or "Audio answer",
-                "score": resp.ai_score,
+                "score": resp.ai_score * 10.0 if resp.ai_score is not None else 0.0,
                 "feedback": resp.ai_feedback,
                 "strengths": resp.evaluation_json.get('strengths', []) if resp.evaluation_json else [],
                 "weaknesses": resp.evaluation_json.get('weaknesses', []) if resp.evaluation_json else [],
