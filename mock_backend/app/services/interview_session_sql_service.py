@@ -1144,7 +1144,7 @@ class InterviewSessionSQLService:
             # 2️⃣ Update interview fields
             session_obj.status = "completed"
             session_obj.completed_at = now
-            
+             
             interview.status = InterviewStatus.COMPLETED
             interview.completed_at = now
             interview.overall_score = round(overall_score, 2)
