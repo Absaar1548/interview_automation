@@ -50,6 +50,11 @@ class ReportGenerationService:
         if not interview:
             raise ValueError(f"Interview {interview_id} not found")
         
+        # 1️⃣ Prevent duplicate report generation.
+        if interview.report_json:
+            logger.info(f"Returning stored report for interview {interview_id}")
+            return interview.report_json
+        
         # Get session (use provided or latest)
         if session_id:
             session_uuid = uuid.UUID(session_id)
@@ -155,7 +160,16 @@ class ReportGenerationService:
             "generated_at": datetime.utcnow().isoformat() + "Z"
         }
         
-        logger.info(f"Generated report for interview {interview_id}")
+        # 2️⃣ Persist the report
+        interview.report_json = report
+        interview.overall_score = report["overall_score"]
+        interview.feedback = report["recommendation_reason"]
+        
+        # 3️⃣ Commit using the existing session
+        session.add(interview)
+        await session.commit()
+        
+        logger.info(f"Generated and persisted report for interview {interview_id}")
         return report
     
     @staticmethod

@@ -20,6 +20,7 @@ export default function InterviewShell() {
     const state = useInterviewStore((s) => s.state);
     const isSubmitting = useInterviewStore((s) => s.isSubmitting);
     const submitAnswer = useInterviewStore((s) => s.submitAnswer);
+    const completeSection = useInterviewStore((s) => s.completeSection);
     const completeInterview = useInterviewStore((s) => s.completeInterview);
     const interviewId = useInterviewStore((s) => s.interviewId);
     const submitCurrentCode = useCodingStore((s) => s.submitCurrentCode);
@@ -268,14 +269,12 @@ export default function InterviewShell() {
         });
     };
 
-    const handleCompleteInterview = async () => {
+    const handleCompleteSection = async () => {
         if (isSubmitting) return;
         try {
-            await completeInterview();
-            // Redirect to thank you page
-            router.push('/thank-you');
+            await completeSection();
         } catch (error) {
-            console.error("Failed to complete interview:", error);
+            console.error("Failed to complete section:", error);
         }
     };
 
@@ -314,17 +313,17 @@ export default function InterviewShell() {
 
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Submit Interview Button - Always visible at top */}
+                {/* Submit Section Button - Always visible at top */}
                 <div className="bg-white border-b border-gray-200 px-6 py-3 flex justify-end">
                     <button
-                        onClick={handleCompleteInterview}
+                        onClick={handleCompleteSection}
                         disabled={isSubmitting}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                        className="px-4 py-2 bg-amber-600 text-white rounded-lg font-medium hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        {isSubmitting ? "Submitting..." : "Submit Interview"}
+                        {isSubmitting ? "Submitting..." : "Submit Section"}
                     </button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6">

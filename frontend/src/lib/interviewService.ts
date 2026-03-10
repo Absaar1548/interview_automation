@@ -129,17 +129,26 @@ class InterviewService {
         );
     }
 
+    async completeSection(): Promise<InterviewState> {
+        const response = await apiClient.post<{ state: InterviewState }, {}>(
+            "/api/v1/candidate/interview/complete-section",
+            {},
+            true
+        );
+        return response.state;
+    }
+
     async completeInterview(): Promise<InterviewState> {
         const response = await apiClient.post<{ state: InterviewState }, {}>(
             "/api/v1/session/complete",
             {},
             true
         );
-        
+
         if (response.state === "COMPLETED") {
             proctoringEngine.stop();
         }
-        
+
         return response.state;
     }
 

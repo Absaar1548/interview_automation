@@ -469,6 +469,20 @@ async def proctoring_event(
     return {"acknowledged": True}
 
 
+@router.post("/candidate/interview/complete-section")
+async def complete_section(
+    x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Mark the current section as completed and return to section selector."""
+    if not x_interview_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
+    
+    session_id = validate_uuid(x_interview_id)
+    return await InterviewSessionSQLService.complete_current_section(session, session_id, current_user.id)
+
+
 @router.post("/session/complete")
 async def complete_interview(
     x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),

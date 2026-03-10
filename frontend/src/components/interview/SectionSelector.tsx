@@ -107,8 +107,8 @@ export default function SectionSelector() {
                                         <button
                                             onClick={() => startSection(section.section_type)}
                                             className={`relative overflow-hidden group/btn px-8 py-3 rounded-xl font-bold text-sm uppercase transition-all duration-300 shadow-lg active:scale-95 ${section.status === "in_progress"
-                                                    ? "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200"
-                                                    : "bg-white text-blue-600 border border-blue-200 hover:border-blue-400 hover:bg-blue-50 shadow-gray-100"
+                                                ? "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200"
+                                                : "bg-white text-blue-600 border border-blue-200 hover:border-blue-400 hover:bg-blue-50 shadow-gray-100"
                                                 }`}
                                         >
                                             <span className="relative z-10">{section.status === "in_progress" ? "Resume" : "Start Section"}</span>
@@ -127,6 +127,33 @@ export default function SectionSelector() {
                             <p className="text-gray-500 font-medium italic">No sections available for this interview.</p>
                         </div>
                     )}
+                </div>
+
+                {/* Submit Interview (global) */}
+                <div className="mt-12 flex flex-col items-center border-t border-gray-100 pt-10">
+                    <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-4">Final Submission</p>
+                    <button
+                        onClick={async () => {
+                            try {
+                                await useInterviewStore.getState().completeInterview();
+                                // Successful completion will set state to COMPLETED, 
+                                // but we force redirect to thank-you as per requirement.
+                                window.location.href = '/thank-you';
+                            } catch (e) {
+                                console.error("Failed to complete interview:", e);
+                            }
+                        }}
+                        className="group relative px-12 py-4 bg-red-600 text-white rounded-2xl font-bold uppercase tracking-wider shadow-xl shadow-red-200 transition-all duration-300 hover:bg-red-700 hover:scale-105 active:scale-95 flex items-center gap-3 overflow-hidden"
+                    >
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Submit Interview</span>
+                    </button>
+                    <p className="mt-4 text-gray-400 text-[10px] font-medium max-w-xs text-center">
+                        Note: You can submit early even if some sections are incomplete.
+                    </p>
                 </div>
             </div>
         </div>

@@ -104,12 +104,28 @@ async def get_interview_report(
         Full interview report dictionary
     """
     try:
-        report = await report_generation_service.generate_interview_report(
-            session=session,
-            interview_id=interview_id,
-            session_id=session_id
-        )
-        return report
+        import uuid
+        interview_uuid = uuid.UUID(interview_id)
+        
+        # 1️⃣ Fetch Interview
+        stmt = select(Interview).where(Interview.id == interview_uuid)
+        result = await session.execute(stmt)
+        interview = result.scalar_one_or_none()
+        
+        if not interview:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+        
+        # 2️⃣ If report_json is missing
+        if not interview.report_json:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, 
+                detail="Report has not been generated yet. Please complete the interview first."
+            )
+        
+        # 3️⃣ Otherwise return stored report
+        return interview.report_json
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid interview ID format")
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:

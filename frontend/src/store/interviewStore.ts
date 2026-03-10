@@ -25,6 +25,7 @@ interface InterviewStore {
     fetchNextQuestion: () => Promise<void>;
     submitAnswer: (payload: EvaluationSubmitRequest) => Promise<void>;
     sendProctoringEvent: (event: ProctoringEventRequest) => Promise<void>;
+    completeSection: () => Promise<void>;
     completeInterview: () => Promise<void>;
     terminate: () => void;
 
@@ -143,6 +144,23 @@ export const useInterviewStore = create<InterviewStore>((set, get) => ({
             // Keeping error state consistent if meaningful.
             const errorMessage = error instanceof Error ? error.message : "Failed to send proctoring event";
             set({ error: errorMessage });
+        }
+    },
+
+    completeSection: async () => {
+        set({ isSubmitting: true, error: null });
+        try {
+            const state = await interviewService.completeSection();
+            set({ state, currentQuestion: null, currentSection: null });
+
+            // Refresh sections to get latest counts and statuses
+            const sect = await interviewService.getSections();
+            set({ sections: sect });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Failed to complete section";
+            set({ error: errorMessage });
+        } finally {
+            set({ isSubmitting: false });
         }
     },
 

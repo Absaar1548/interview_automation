@@ -27,6 +27,7 @@ class Interview(Base):
     
     overall_score: Mapped[float] = mapped_column(Float, nullable=True)
     feedback: Mapped[str] = mapped_column(String, nullable=True)
+    report_json: Mapped[dict] = mapped_column(JSON, nullable=True)
     
     curated_questions: Mapped[list] = mapped_column(JSON, nullable=True)
 

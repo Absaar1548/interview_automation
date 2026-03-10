@@ -825,6 +825,14 @@ class InterviewSessionSQLService:
                         interview.status = InterviewStatus.COMPLETED
                         interview.completed_at = now
                         interview.overall_score = round(overall_score, 2)
+                        
+                        # Trigger report generation
+                        from app.services.report_generation_service import report_generation_service
+                        await report_generation_service.generate_interview_report(
+                            session=session,
+                            interview_id=str(interview.id),
+                            session_id=str(session_id)
+                        )
             
             await uow.flush()
             return {"state": return_state}
@@ -1040,9 +1048,44 @@ class InterviewSessionSQLService:
                         f"Key Strengths: {', '.join(strengths_list) if strengths_list else 'N/A'}. "
                         f"Areas for Improvement: {', '.join(weaknesses_list) if weaknesses_list else 'N/A'}."
                     )
+                    
+                    # Trigger report generation
+                    from app.services.report_generation_service import report_generation_service
+                    await report_generation_service.generate_interview_report(
+                        session=session,
+                        interview_id=str(interview.id),
+                        session_id=str(session_id)
+                    )
 
             await uow.flush()
             return {"state": return_state}
+
+    @staticmethod
+    async def complete_current_section(
+        session: AsyncSession, session_id: uuid.UUID, candidate_id: uuid.UUID
+    ) -> Dict[str, Any]:
+        async with UnitOfWork(session) as uow:
+            from app.db.sql.models.interview_session_section import InterviewSessionSection
+            
+            session_obj, _ = await InterviewSessionSQLService._get_session_and_interview(
+                uow, session_id, candidate_id, with_for_update=True
+            )
+
+            if not session_obj.current_section_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No active section to complete."
+                )
+
+            current_section = await uow.session.get(InterviewSessionSection, session_obj.current_section_id)
+            if current_section:
+                current_section.status = "completed"
+                current_section.completed_at = datetime.now(timezone.utc)
+            
+            session_obj.current_section_id = None
+            await uow.flush()
+
+            return {"state": "SECTION_COMPLETED"}
 
     @staticmethod
     async def complete_session(
@@ -1054,10 +1097,33 @@ class InterviewSessionSQLService:
             )
 
             now = datetime.now(timezone.utc)
+            
+            # 1️⃣ Calculate average score
+            score_stmt = select(func.avg(InterviewResponse.ai_score)).where(
+                InterviewResponse.session_id == session_id
+            )
+            avg_score_result = await uow.session.execute(score_stmt)
+            avg_score = avg_score_result.scalar() or 0.0
+            overall_score = (avg_score / 10.0) * 100.0
+
+            # 2️⃣ Update interview fields
             session_obj.status = "completed"
             session_obj.completed_at = now
+            
             interview.status = InterviewStatus.COMPLETED
             interview.completed_at = now
+            interview.overall_score = round(overall_score, 2)
+
+            # 3️⃣ Flush
+            await uow.flush()
+
+            # 4️⃣ Trigger report generation
+            from app.services.report_generation_service import report_generation_service
+            await report_generation_service.generate_interview_report(
+                session=uow.session,
+                interview_id=str(interview.id),
+                session_id=str(session_obj.id)
+            )
 
             return {"state": "COMPLETED"}
 
