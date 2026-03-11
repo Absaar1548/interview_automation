@@ -34,9 +34,9 @@ export default function CodingQuestion({ question, interviewId }: CodingQuestion
     )
 
     return (
-        <div className="flex flex-col xl:flex-row gap-6 h-[calc(100vh-280px)] min-h-[600px]">
+        <div className="flex flex-col xl:flex-row gap-2 h-[calc(100vh-100px)] min-h-[600px] bg-[#1a1a1a] p-2">
             {/* Left Column: Problem */}
-            <div className="flex-1 xl:w-2/5 h-full">
+            <div className="flex-1 xl:w-1/2 h-full flex flex-col">
                 <ProblemPanel
                     title={problem.title}
                     difficulty={problem.difficulty}
@@ -46,11 +46,11 @@ export default function CodingQuestion({ question, interviewId }: CodingQuestion
             </div>
 
             {/* Right Column: Editor & Results */}
-            <div className="flex-1 xl:w-3/5 flex flex-col gap-6 h-full">
-                <div className="flex-[2] overflow-hidden">
+            <div className="flex-1 xl:w-1/2 flex flex-col gap-2 h-full">
+                <div className="flex-[3] overflow-hidden rounded-lg">
                     <CodeEditorPanel />
                 </div>
-                <div className="flex-1 overflow-visible">
+                <div className="flex-[2] overflow-hidden rounded-lg">
                     <ResultsPanel
                         results={results}
                         summary={resultSummary}

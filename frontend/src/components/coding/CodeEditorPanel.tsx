@@ -40,14 +40,14 @@ export default function CodeEditorPanel() {
     const currentMonacoLang = supportedLanguages.find(l => l.value === language)?.monaco || "python"
 
     return (
-        <div className="flex flex-col h-full bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+        <div className="flex flex-col h-full bg-[#1e1e1e] rounded-lg overflow-hidden border border-[#3e3e42] shadow-xl">
+            <div className="px-4 py-2 border-b border-[#3e3e42] flex items-center justify-between bg-[#313131]">
                 <div className="flex items-center gap-4">
                     <select
                         value={language}
                         onChange={handleLanguageChange}
                         disabled={isSubmitted || isSubmitting || isRunning}
-                        className="bg-white border border-gray-200 rounded px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-gray-100 disabled:cursor-not-allowed transition-all"
+                        className="bg-[#3e3e42] text-[#eff1f6] border border-[#5c5c60] rounded px-3 py-1.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-[#7a7a7d] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
                     >
                         {supportedLanguages.map(l => (
                             <option key={l.value} value={l.value}>
@@ -57,43 +57,48 @@ export default function CodeEditorPanel() {
                     </select>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                     <button
                         onClick={() => runCurrentCode()}
                         disabled={isSubmitted || isSubmitting || isRunning}
-                        className="px-3 py-1 bg-gray-100 text-gray-700 text-xs font-black uppercase rounded border border-gray-200 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        className="px-4 py-1.5 bg-[#3e3e42] text-[#eff1f6] text-xs font-bold rounded-md hover:bg-[#4a4a4e] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                     >
-                        Run tests
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4l12 6-12 6V4z" /></svg>
+                        Run
                     </button>
                     <button
                         onClick={() => submitCurrentCode(interviewId || undefined)}
                         disabled={isSubmitted || isSubmitting || isRunning}
-                        className="px-3 py-1 bg-blue-600 text-white text-xs font-black uppercase rounded border border-blue-700 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm shadow-blue-200"
+                        className="px-4 py-1.5 bg-[#2cbb5d] text-white text-xs font-bold rounded-md hover:bg-[#32cd66] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
                     >
-                        Submit Solution
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                        Submit
                     </button>
                 </div>
             </div>
 
-            <div className="flex-1 relative min-h-[400px]">
+            <div className="flex-1 relative min-h-[400px] bg-[#1e1e1e]">
                 <Editor
                     height="100%"
                     language={currentMonacoLang}
-                    theme="vs-light"
+                    theme="vs-dark"
                     value={code}
                     onChange={handleEditorChange}
                     options={{
                         readOnly: isSubmitted,
                         minimap: { enabled: false },
                         fontSize: 14,
+                        fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
                         scrollBeyondLastLine: false,
                         automaticLayout: true,
-                        padding: { top: 16, bottom: 16 }
+                        padding: { top: 16, bottom: 16 },
+                        renderLineHighlight: "all",
+                        matchBrackets: "always",
                     }}
                 />
                 {isSubmitted && (
-                    <div className="absolute inset-0 bg-gray-50/20 z-10 pointer-events-none flex items-center justify-center">
-                        <div className="bg-white/80 backdrop-blur-sm px-4 py-2 rounded-full border border-gray-200 shadow-xl text-xs font-bold text-gray-500 uppercase tracking-widest translate-y-20">
+                    <div className="absolute inset-0 bg-[#1e1e1e]/60 z-10 pointer-events-none flex items-center justify-center backdrop-blur-[1px]">
+                        <div className="bg-[#2cbb5d] text-white px-6 py-2 rounded-full shadow-lg text-sm font-bold tracking-wide translate-y-20">
                             Solution Submitted - View Only
                         </div>
                     </div>
