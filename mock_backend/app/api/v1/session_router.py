@@ -419,7 +419,7 @@ async def start_section(
     else:
         raise HTTPException(status_code=400, detail="Must provide section_id or section_type")
     
-    if section_type_to_start == "CODING":
+    if section_type_to_start.lower() == "coding":
         from app.services.code_container_session_service import CodeContainerSessionService
         logger.info(f"Creating coding session container for interview {session_id}")
         CodeContainerSessionService.create_session_container(str(session_id))
