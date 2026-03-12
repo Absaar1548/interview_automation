@@ -79,7 +79,7 @@ class CodeContainerSessionService:
             existing = client.container_groups.get(resource_group, cg_name)
             state = existing.instance_view.state if existing.instance_view else "Unknown"
             if state == "Running":
-                logger.info(f"Container {cg_name} already running.")
+                logger.info(f"✔ container reused: {cg_name} already running.")
                 return True
         except Exception:
             pass # Does not exist
@@ -113,7 +113,7 @@ class CodeContainerSessionService:
             image_registry_credentials=registry_credentials if registry_credentials else None
         )
 
-        logger.info(f"Creating session container {cg_name}")
+        logger.info(f"✔ container created: {cg_name}")
         poller = client.container_groups.begin_create_or_update(resource_group, cg_name, group)
         poller.result() # Wait until created
 
@@ -150,7 +150,7 @@ class CodeContainerSessionService:
         resource_group = settings.AZURE_ACI_RESOURCE_GROUP
         try:
             client = CodeContainerSessionService._get_client()
-            logger.info(f"Deleting session container {cg_name}")
+            logger.info(f"✔ container deleted: {cg_name}")
             client.container_groups.begin_delete(resource_group, cg_name)
         except Exception as e:
             logger.warning(f"Error deleting session container: {e}")

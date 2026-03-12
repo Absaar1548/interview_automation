@@ -14,6 +14,11 @@ from app.db.sql.session import AsyncSessionLocal, test_database_connection
 import logging
 from pathlib import Path
 
+# Suppress noisy Azure SDK logs
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 # Load .env file explicitly before importing services
 try:
     from dotenv import load_dotenv

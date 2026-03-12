@@ -51,7 +51,7 @@ class CodeRunRequest(BaseModel):
     problem_id: str
     language: str
     source_code: str
-    interview_id: Optional[str] = None
+    interview_id: str
     candidate_id: Optional[str] = None
     session_question_id: Optional[str] = None
 
