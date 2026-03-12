@@ -19,3 +19,4 @@ azure-cognitiveservices-speech>=1.32.0
 python-dotenv>=1.0.0
 azure-identity
 azure-mgmt-containerinstance
+azure-cli
