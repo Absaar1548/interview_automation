@@ -1,9 +1,9 @@
 """
 Code Execution Service
 ----------------------
-Runs candidate source code inside isolated Docker containers.
+Runs candidate source code inside isolated Docker containers (Local) or Azure Container Instances (ACI).
 
-Security model:
+Security model (Local):
   - Network disabled (--network none)
   - Memory capped at 256 MB
   - CPU capped at 1 core
@@ -16,9 +16,29 @@ import os
 import subprocess
 import tempfile
 import logging
+import base64
+import uuid
+import time
 from typing import Optional
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+try:
+    from azure.identity import DefaultAzureCredential
+    from azure.mgmt.containerinstance import ContainerInstanceManagementClient
+    from azure.mgmt.containerinstance.models import (
+        ContainerGroup,
+        Container,
+        ContainerPort,
+        EnvironmentVariable,
+        ResourceRequests,
+        ResourceRequirements,
+        OperatingSystemTypes,
+    )
+    AZURE_SDK_AVAILABLE = True
+except ImportError:
+    AZURE_SDK_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Security limits
@@ -30,7 +50,7 @@ MEMORY_LIMIT = "256m"
 # Per-language configuration
 # ---------------------------------------------------------------------------
 # Each entry defines:
-#   image       – Docker image to use (must be pre-built on the host)
+#   image       – Docker image to use (must be pre-built on the host for local, or ACR for Azure)
 #   filename    – name given to the source file inside /code/
 #   compile_cmd – shell tokens run before the program (None = interpreted)
 #   run_cmd     – shell tokens used to execute the program
@@ -63,7 +83,7 @@ LANGUAGE_CONFIG: dict[str, dict] = {
 }
 
 # ---------------------------------------------------------------------------
-# Base Docker flags applied to every container run
+# Base Docker flags applied to every container run (LOCAL ONLY)
 # ---------------------------------------------------------------------------
 _DOCKER_BASE_FLAGS = [
     "--rm",
@@ -84,12 +104,7 @@ def _run_subprocess(
     stdin_data: Optional[str] = None,
     timeout: int = TIMEOUT_SECONDS,
 ) -> dict:
-    """
-    Execute *cmd* as a subprocess and return a normalised result dict.
-
-    Returns:
-        {stdout, stderr, exit_code, timed_out, error}
-    """
+    """Execute *cmd* as a subprocess and return a normalised result dict."""
     try:
         result = subprocess.run(
             cmd,
@@ -137,10 +152,7 @@ def _docker_run_cmd(image: str, mount_dir: str, run_cmd: list[str]) -> list[str]
 
 
 def _docker_compile_cmd(image: str, mount_dir: str, compile_cmd: list[str]) -> list[str]:
-    """
-    Build a ``docker run`` command for compilation.
-    The volume is mounted read-write so the compiler can emit output artefacts.
-    """
+    """Build a ``docker run`` command for compilation."""
     return [
         "docker", "run",
         *_DOCKER_BASE_FLAGS,
@@ -150,55 +162,147 @@ def _docker_compile_cmd(image: str, mount_dir: str, compile_cmd: list[str]) -> l
     ]
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+def is_azure_aci_configured() -> bool:
+    """Check if Azure Container Instances configuration is present."""
+    return bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
 
-def execute_code(
-    language: str,
+
+# ---------------------------------------------------------------------------
+# Azure Execution
+# ---------------------------------------------------------------------------
+def _execute_code_azure(
+    config: dict,
     source_code: str,
     stdin_input: Optional[str] = None,
 ) -> dict:
-    """
-    Execute *source_code* written in *language* inside a Docker sandbox.
+    if not AZURE_SDK_AVAILABLE:
+        return {
+            "stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
+            "error": "Azure AD / ACI SDKs not installed. Please install azure-identity and azure-mgmt-containerinstance."
+        }
 
-    Steps
-    -----
-    1. Validate the requested language.
-    2. Write the source file to a temporary directory.
-    3. If the language requires compilation, compile first.
-    4. Run the program, piping *stdin_input* if provided.
-    5. Return a result dict with stdout / stderr / exit_code / timed_out / error.
+    sub_id = settings.AZURE_SUBSCRIPTION_ID
+    resource_group = settings.AZURE_ACI_RESOURCE_GROUP
+    location = getattr(settings, "AZURE_ACI_LOCATION", "eastus")
+    acr_server = getattr(settings, "AZURE_ACR_SERVER", "")
 
-    Returns
-    -------
-    {
-        "stdout"   : str,
-        "stderr"   : str,
-        "exit_code": int,
-        "timed_out": bool,
-        "error"    : str | None,
-    }
-    """
-    # --- validate language -------------------------------------------------
-    lang = language.lower().strip()
-    if lang not in LANGUAGE_CONFIG:
-        supported = ", ".join(LANGUAGE_CONFIG.keys())
+    # For Azure, the image should be pulled from ACR (or a public registry if acr_server is empty)
+    img = f"{acr_server}/{config['image']}:latest" if acr_server else f"{config['image']}:latest"
+
+    # We use a trick to encode the code/input and decode it inside the container using shell
+    src_b64 = base64.b64encode(source_code.encode("utf-8")).decode("utf-8")
+    std_b64 = base64.b64encode((stdin_input or "").encode("utf-8")).decode("utf-8")
+    
+    filename = config["filename"]
+    
+    # Constructing a single bash command to write code, compile (if needed), and run logic
+    cmds = [
+        "mkdir -p /code",
+        f"echo {src_b64} | base64 -d > /code/{filename}"
+    ]
+    if config["compile_cmd"]:
+        comp_str = " ".join(config["compile_cmd"])
+        # Append logic to only run if compilation succeeds
+        cmds.append(f"{comp_str}")
+        
+    run_str = " ".join(config["run_cmd"])
+    cmds.append(f"echo {std_b64} | base64 -d | {run_str}")
+    
+    full_cmd = " && ".join(cmds)
+    
+    # To run this in an ACI container gracefully, we wrap it in a shell
+    entrypoint = ["/bin/sh", "-c", full_cmd]
+
+    cg_name = f"code-run-{uuid.uuid4().hex[:8]}"
+    container_name = "runner"
+
+    try:
+        credential = DefaultAzureCredential()
+        client = ContainerInstanceManagementClient(credential, sub_id)
+
+        container_resource = Container(
+            name=container_name,
+            image=img,
+            resources=ResourceRequirements(requests=ResourceRequests(memory_in_gb=0.5, cpu=1.0)),
+            command=entrypoint,
+        )
+
+        group = ContainerGroup(
+            location=location,
+            containers=[container_resource],
+            os_type=OperatingSystemTypes.linux,
+            restart_policy="Never" # single execution
+        )
+
+        # Deploy container
+        logger.info(f"Creating Azure Container Instance: {cg_name}")
+        poller = client.container_groups.begin_create_or_update(resource_group, cg_name, group)
+        poller.result() # Wait for deployment
+
+        # Wait until terminal state
+        terminal_states = ["Succeeded", "Failed", "Terminated"]
+        max_waits = 30 # approx 1 minute max wait time on top of deployment
+        logs = ""
+        exit_code = 0
+        timed_out = False
+
+        for _ in range(max_waits):
+            cg = client.container_groups.get(resource_group, cg_name)
+            state = cg.instance_view.state if cg.instance_view else "Unknown"
+            c_state = cg.containers[0].instance_view.current_state.state if cg.containers[0].instance_view and cg.containers[0].instance_view.current_state else "Unknown"
+            
+            if c_state in terminal_states:
+                try:
+                    c_props = cg.containers[0].instance_view.current_state
+                    exit_code = c_props.exit_code if c_props.exit_code is not None else 0
+                except AttributeError:
+                    pass
+                break
+            time.sleep(2)
+        else:
+            timed_out = True
+
+        # Fetch logs (stdout and stderr combined in ACI by default)
+        try:
+            log_result = client.containers.list_logs(resource_group, cg_name, container_name)
+            logs = log_result.content
+        except Exception:
+            logs = "Failed to fetch logs."
+
+        # Cleanup
+        client.container_groups.begin_delete(resource_group, cg_name)
+
+        return {
+            "stdout": logs if exit_code == 0 else "",
+            "stderr": logs if exit_code != 0 else "",
+            "exit_code": exit_code,
+            "timed_out": timed_out,
+            "error": "Timeout in ACI" if timed_out else None,
+        }
+
+    except Exception as e:
+        logger.exception("Azure Execution Error")
         return {
             "stdout": "",
             "stderr": "",
             "exit_code": -1,
             "timed_out": False,
-            "error": f"Unsupported language '{language}'. Supported: {supported}",
+            "error": str(e),
         }
 
-    config = LANGUAGE_CONFIG[lang]
+# ---------------------------------------------------------------------------
+# Local Execution
+# ---------------------------------------------------------------------------
+def _execute_code_local(
+    config: dict,
+    source_code: str,
+    stdin_input: Optional[str] = None,
+) -> dict:
     image = config["image"]
     filename = config["filename"]
     compile_cmd = config["compile_cmd"]
     run_cmd = config["run_cmd"]
 
-    # --- write source to temp dir -----------------------------------------
     with tempfile.TemporaryDirectory() as tmp_dir:
         source_path = os.path.join(tmp_dir, filename)
         try:
@@ -213,13 +317,11 @@ def execute_code(
                 "error": f"Failed to write source file: {exc}",
             }
 
-        # --- compile (if required) ----------------------------------------
         if compile_cmd:
             compile_docker_cmd = _docker_compile_cmd(image, tmp_dir, compile_cmd)
             compile_result = _run_subprocess(compile_docker_cmd, timeout=TIMEOUT_SECONDS)
 
             if compile_result["timed_out"] or compile_result["exit_code"] != 0:
-                # Surface compilation errors directly to the caller
                 return {
                     "stdout": compile_result["stdout"],
                     "stderr": compile_result["stderr"] or compile_result["error"],
@@ -228,11 +330,37 @@ def execute_code(
                     "error": "Compilation failed.",
                 }
 
-        # --- run -------------------------------------------------------------
         run_docker_cmd = _docker_run_cmd(image, tmp_dir, run_cmd)
         return _run_subprocess(run_docker_cmd, stdin_data=stdin_input, timeout=TIMEOUT_SECONDS)
 
-        # tempfile.TemporaryDirectory context manager cleans up tmp_dir here
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def execute_code(
+    language: str,
+    source_code: str,
+    stdin_input: Optional[str] = None,
+) -> dict:
+    lang = language.lower().strip()
+    if lang not in LANGUAGE_CONFIG:
+        supported = ", ".join(LANGUAGE_CONFIG.keys())
+        return {
+            "stdout": "",
+            "stderr": "",
+            "exit_code": -1,
+            "timed_out": False,
+            "error": f"Unsupported language '{language}'. Supported: {supported}",
+        }
+
+    config = LANGUAGE_CONFIG[lang]
+
+    # Check if Azure Container Instances applies
+    if is_azure_aci_configured():
+        return _execute_code_azure(config, source_code, stdin_input)
+    else:
+        return _execute_code_local(config, source_code, stdin_input)
 
 
 def run_test_cases(
@@ -240,33 +368,6 @@ def run_test_cases(
     source_code: str,
     test_cases: list[dict],
 ) -> list[dict]:
-    """
-    Run *source_code* against a list of test cases and return pass/fail results.
-
-    Parameters
-    ----------
-    language    : one of the keys in LANGUAGE_CONFIG
-    source_code : the candidate's solution
-    test_cases  : list of dicts, each with keys:
-                    - id              (str | UUID)
-                    - input           (str)
-                    - expected_output (str)
-
-    Returns
-    -------
-    List of result dicts:
-    [
-        {
-            "test_case_id"    : ...,
-            "input"           : str,
-            "expected_output" : str,
-            "actual_output"   : str,
-            "passed"          : bool,
-            "error"           : str | None,
-        },
-        ...
-    ]
-    """
     results = []
 
     for tc in test_cases:
@@ -274,25 +375,22 @@ def run_test_cases(
         stdin_input: str = tc.get("input", "")
         expected_output: str = tc.get("expected_output", "")
 
-        # Execute the code for this test case
         exec_result = execute_code(
             language=language,
             source_code=source_code,
             stdin_input=stdin_input,
         )
 
-        # Normalise actual output: strip trailing whitespace for comparison
         actual_output: str = exec_result["stdout"]
         actual_stripped = actual_output.strip()
         expected_stripped = expected_output.strip()
 
-        # Determine pass/fail
         execution_error = exec_result.get("error")
         timed_out = exec_result.get("timed_out", False)
 
         if timed_out:
             passed = False
-            error_msg = exec_result["error"]  # timeout message
+            error_msg = exec_result["error"]
         elif execution_error:
             passed = False
             error_msg = execution_error
@@ -313,3 +411,4 @@ def run_test_cases(
         })
 
     return results
+

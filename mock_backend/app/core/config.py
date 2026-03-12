@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     OPENAI_API_BASE: str = os.getenv("OPENAI_API_BASE", "")  # e.g. Azure: https://xxx.openai.azure.com/
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # or gpt-4, etc.
 
+    # Azure Container Instances for Code Execution
+    AZURE_ACI_RESOURCE_GROUP: str = os.getenv("AZURE_ACI_RESOURCE_GROUP", "")
+    AZURE_ACI_LOCATION: str = os.getenv("AZURE_ACI_LOCATION", "eastus")
+    AZURE_SUBSCRIPTION_ID: str = os.getenv("AZURE_SUBSCRIPTION_ID", "")
+    AZURE_ACR_SERVER: str = os.getenv("AZURE_ACR_SERVER", "") # e.g. myregistry.azurecr.io
+
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
