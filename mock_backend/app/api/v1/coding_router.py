@@ -235,6 +235,7 @@ async def run_code(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,
+        interview_id=request.interview_id,
     )
 
     results = [
@@ -345,6 +346,7 @@ async def submit_code(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,
+        interview_id=request.interview_id,
     )
 
     results = [

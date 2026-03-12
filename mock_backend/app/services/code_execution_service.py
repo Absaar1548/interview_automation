@@ -174,6 +174,7 @@ def _execute_code_azure(
     config: dict,
     source_code: str,
     stdin_input: Optional[str] = None,
+    interview_id: Optional[str] = None,
 ) -> dict:
     if not AZURE_SDK_AVAILABLE:
         return {
@@ -206,82 +207,158 @@ def _execute_code_azure(
         cmds.append(f"{comp_str}")
         
     run_str = " ".join(config["run_cmd"])
-    cmds.append(f"echo {std_b64} | base64 -d | {run_str}")
+    # 5 second timeout required
+    cmds.append(f"echo {std_b64} | base64 -d | timeout 5 {run_str}")
     
     full_cmd = " && ".join(cmds)
     
-    # To run this in an ACI container gracefully, we wrap it in a shell
-    entrypoint = ["/bin/sh", "-c", full_cmd]
-
-    cg_name = f"code-run-{uuid.uuid4().hex[:8]}"
-    container_name = "runner"
-
-    try:
-        credential = DefaultAzureCredential()
-        client = ContainerInstanceManagementClient(credential, sub_id)
-
-        container_resource = Container(
-            name=container_name,
-            image=img,
-            resources=ResourceRequirements(requests=ResourceRequests(memory_in_gb=0.5, cpu=1.0)),
-            command=entrypoint,
-        )
-
-        group = ContainerGroup(
-            location=location,
-            containers=[container_resource],
-            os_type=OperatingSystemTypes.linux,
-            restart_policy="Never" # single execution
-        )
-
-        # Deploy container
-        logger.info(f"Creating Azure Container Instance: {cg_name}")
-        poller = client.container_groups.begin_create_or_update(resource_group, cg_name, group)
-        poller.result() # Wait for deployment
-
-        # Wait until terminal state
-        terminal_states = ["Succeeded", "Failed", "Terminated"]
-        max_waits = 30 # approx 1 minute max wait time on top of deployment
-        logs = ""
-        exit_code = 0
-        timed_out = False
-
-        for _ in range(max_waits):
-            cg = client.container_groups.get(resource_group, cg_name)
-            state = cg.instance_view.state if cg.instance_view else "Unknown"
-            c_state = cg.containers[0].instance_view.current_state.state if cg.containers[0].instance_view and cg.containers[0].instance_view.current_state else "Unknown"
-            
-            if c_state in terminal_states:
-                try:
-                    c_props = cg.containers[0].instance_view.current_state
-                    exit_code = c_props.exit_code if c_props.exit_code is not None else 0
-                except AttributeError:
-                    pass
-                break
-            time.sleep(2)
-        else:
-            timed_out = True
-
-        # Fetch logs (stdout and stderr combined in ACI by default)
+    wrapped_cmd = f"{{ {full_cmd} ; }} ; echo \"__EXIT_CODE__$?\""
+    b64_cmd = base64.b64encode(wrapped_cmd.encode("utf-8")).decode("utf-8")
+    final_entrypoint = f"/bin/sh -c 'echo {b64_cmd} | base64 -d | sh'"
+    
+    if interview_id:
+        cg_name = f"code-runner-{interview_id}"
+        container_name = "runner"
         try:
-            log_result = client.containers.list_logs(resource_group, cg_name, container_name)
-            logs = log_result.content
-        except Exception:
-            logs = "Failed to fetch logs."
-
-        # Cleanup
-        client.container_groups.begin_delete(resource_group, cg_name)
-
-        return {
-            "stdout": logs if exit_code == 0 else "",
-            "stderr": logs if exit_code != 0 else "",
-            "exit_code": exit_code,
-            "timed_out": timed_out,
-            "error": "Timeout in ACI" if timed_out else None,
-        }
-
-    except Exception as e:
-        logger.exception("Azure Execution Error")
+            credential = DefaultAzureCredential()
+            client = ContainerInstanceManagementClient(credential, sub_id)
+            
+            from azure.mgmt.containerinstance.models import ContainerExecRequest, ContainerExecRequestTerminalSize
+            import websockets.sync.client
+            import re
+            
+            exec_req = ContainerExecRequest(
+                command=final_entrypoint,
+                terminal_size=ContainerExecRequestTerminalSize(rows=24, cols=80)
+            )
+            
+            resp = client.containers.execute_command(
+                resource_group,
+                cg_name,
+                container_name,
+                exec_req
+            )
+            
+            logs = ""
+            try:
+                with websockets.sync.client.connect(resp.web_socket_uri) as ws:
+                    ws.send(resp.password)
+                    while True:
+                        try:
+                            msg = ws.recv(timeout=10)
+                            if isinstance(msg, bytes):
+                                msg = msg.decode("utf-8")
+                            logs += msg
+                        except Exception:
+                            break
+            except Exception as wse:
+                logger.error(f"Websocket error: {wse}")
+            
+            exit_code = -1
+            timed_out = False
+            
+            match = re.search(r"__EXIT_CODE__(\d+)", logs)
+            if match:
+                exit_code = int(match.group(1))
+                logs = logs[:match.start()].strip()
+            else:
+                if len(logs) == 0 or "Terminated" in logs:
+                    timed_out = True
+                
+            return {
+                "stdout": logs if exit_code == 0 else "",
+                "stderr": logs if exit_code != 0 else "",
+                "exit_code": exit_code,
+                "timed_out": timed_out,
+                "error": "Timeout or error in ACI" if exit_code != 0 and not logs else None,
+            }
+        except Exception as e:
+            logger.exception("Azure Exec on Running Container Error")
+            return {
+                "stdout": "",
+                "stderr": "",
+                "exit_code": -1,
+                "timed_out": False,
+                "error": str(e),
+            }
+    else:
+        # Fallback to creating a new container
+        entrypoint = ["/bin/sh", "-c", wrapped_cmd]
+        cg_name = f"code-run-{uuid.uuid4().hex[:8]}"
+        container_name = "runner"
+    
+        try:
+            credential = DefaultAzureCredential()
+            client = ContainerInstanceManagementClient(credential, sub_id)
+    
+            container_resource = Container(
+                name=container_name,
+                image=img,
+                resources=ResourceRequirements(requests=ResourceRequests(memory_in_gb=0.5, cpu=1.0)),
+                command=entrypoint,
+            )
+    
+            group = ContainerGroup(
+                location=location,
+                containers=[container_resource],
+                os_type=OperatingSystemTypes.linux,
+                restart_policy="Never" # single execution
+            )
+    
+            # Deploy container
+            logger.info(f"Creating Azure Container Instance: {cg_name}")
+            poller = client.container_groups.begin_create_or_update(resource_group, cg_name, group)
+            poller.result() # Wait for deployment
+    
+            # Wait until terminal state
+            terminal_states = ["Succeeded", "Failed", "Terminated"]
+            max_waits = 30 # approx 1 minute max wait time on top of deployment
+            logs = ""
+            exit_code = 0
+            timed_out = False
+    
+            for _ in range(max_waits):
+                cg = client.container_groups.get(resource_group, cg_name)
+                state = cg.instance_view.state if cg.instance_view else "Unknown"
+                c_state = cg.containers[0].instance_view.current_state.state if cg.containers[0].instance_view and cg.containers[0].instance_view.current_state else "Unknown"
+                
+                if c_state in terminal_states:
+                    try:
+                        c_props = cg.containers[0].instance_view.current_state
+                        exit_code = c_props.exit_code if c_props.exit_code is not None else 0
+                    except AttributeError:
+                        pass
+                    break
+                time.sleep(2)
+            else:
+                timed_out = True
+    
+            # Fetch logs (stdout and stderr combined in ACI by default)
+            try:
+                log_result = client.containers.list_logs(resource_group, cg_name, container_name)
+                logs = log_result.content
+            except Exception:
+                logs = "Failed to fetch logs."
+    
+            # Cleanup
+            client.container_groups.begin_delete(resource_group, cg_name)
+            
+            import re
+            match = re.search(r"__EXIT_CODE__(\d+)", logs)
+            if match:
+                exit_code = int(match.group(1))
+                logs = logs[:match.start()].strip()
+    
+            return {
+                "stdout": logs if exit_code == 0 else "",
+                "stderr": logs if exit_code != 0 else "",
+                "exit_code": exit_code,
+                "timed_out": timed_out,
+                "error": "Timeout in ACI" if timed_out else None,
+            }
+    
+        except Exception as e:
+            logger.exception("Azure Execution Error")
         return {
             "stdout": "",
             "stderr": "",
@@ -342,6 +419,7 @@ def execute_code(
     language: str,
     source_code: str,
     stdin_input: Optional[str] = None,
+    interview_id: Optional[str] = None,
 ) -> dict:
     lang = language.lower().strip()
     if lang not in LANGUAGE_CONFIG:
@@ -358,7 +436,7 @@ def execute_code(
 
     # Check if Azure Container Instances applies
     if is_azure_aci_configured():
-        return _execute_code_azure(config, source_code, stdin_input)
+        return _execute_code_azure(config, source_code, stdin_input, interview_id=interview_id)
     else:
         return _execute_code_local(config, source_code, stdin_input)
 
@@ -367,6 +445,7 @@ def run_test_cases(
     language: str,
     source_code: str,
     test_cases: list[dict],
+    interview_id: Optional[str] = None,
 ) -> list[dict]:
     results = []
 
@@ -379,6 +458,7 @@ def run_test_cases(
             language=language,
             source_code=source_code,
             stdin_input=stdin_input,
+            interview_id=interview_id,
         )
 
         actual_output: str = exec_result["stdout"]
