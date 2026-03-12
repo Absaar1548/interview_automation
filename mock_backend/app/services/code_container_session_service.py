@@ -34,7 +34,9 @@ except ImportError:
 class CodeContainerSessionService:
     @staticmethod
     def is_azure_aci_configured() -> bool:
-        return bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
+        is_enabled = str(getattr(settings, "USE_AZURE_ACI", "false")).lower() == "true"
+        has_config = bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
+        return is_enabled and has_config
 
     @staticmethod
     def _get_client():

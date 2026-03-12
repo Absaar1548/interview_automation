@@ -498,7 +498,19 @@ async def complete_section(
     sections = await InterviewSessionSQLService.get_sections(session, session_id, current_user.id)
     active_section = next((s for s in sections if s.get("status") == "in_progress" or s.get("is_current")), None)
     
-
+    if active_section and active_section.get("section_type") == "CODING":
+        container_name = f"code-runner-{session_id}"
+        logger.info(f"Deleting coding container {container_name}")
+        try:
+            from app.services.code_container_session_service import CodeContainerSessionService
+            import asyncio
+            # Run synchronous delete_session_container in a background thread to avoid blocking Event Loop
+            await asyncio.to_thread(
+                CodeContainerSessionService.delete_session_container,
+                str(session_id)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to delete session container: {e}")
 
     return await InterviewSessionSQLService.complete_current_section(session, session_id, current_user.id)
 

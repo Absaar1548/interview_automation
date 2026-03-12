@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     AZURE_ACR_SERVER: str = os.getenv("AZURE_ACR_SERVER", "") # e.g. myregistry.azurecr.io
     AZURE_ACR_USERNAME: str = os.getenv("AZURE_ACR_USERNAME", "")
     AZURE_ACR_PASSWORD: str = os.getenv("AZURE_ACR_PASSWORD", "")
+    USE_AZURE_ACI: str = os.getenv("USE_AZURE_ACI", "false")
 
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
