@@ -493,6 +493,26 @@ async def complete_section(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
     
     session_id = validate_uuid(x_interview_id)
+
+    sections = await InterviewSessionSQLService.get_sections(session, session_id, current_user.id)
+    active_section = next((s for s in sections if s.get("status") == "in_progress" or s.get("is_current")), None)
+    
+    if active_section and active_section.get("section_type") == "CODING":
+        container_name = f"code-runner-{session_id}"
+        logger.info(f"Deleting coding container {container_name}")
+        
+        import subprocess
+        import asyncio
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["docker", "rm", "-f", container_name],
+                capture_output=True,
+                text=True
+            )
+        except Exception as e:
+            logger.warning(f"Error terminating coding container: {e}")
+
     return await InterviewSessionSQLService.complete_current_section(session, session_id, current_user.id)
 
 

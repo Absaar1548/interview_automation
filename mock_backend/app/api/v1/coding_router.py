@@ -230,8 +230,17 @@ async def run_code(
         for tc in visible_tcs
     ]
 
-    # Execute (synchronous — wraps subprocess)
-    raw_results = run_test_cases(
+    from app.services.code_execution_service import container_exists
+    
+    container_name = f"code-runner-{request.interview_id}"
+    if not await container_exists(container_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Coding container not initialized. Start coding section first."
+        )
+
+    # Execute (now async background run)
+    raw_results = await run_test_cases(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,
@@ -341,8 +350,17 @@ async def submit_code(
         for tc in all_tcs
     ]
 
+    from app.services.code_execution_service import container_exists
+    
+    container_name = f"code-runner-{request.interview_id}"
+    if not await container_exists(container_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Coding container not initialized. Start coding section first."
+        )
+
     # Execute against all test cases
-    raw_results = run_test_cases(
+    raw_results = await run_test_cases(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,

@@ -100,14 +100,16 @@ _DOCKER_BASE_FLAGS = [
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _run_subprocess(
+async def _run_subprocess(
     cmd: list[str],
     stdin_data: Optional[str] = None,
     timeout: int = TIMEOUT_SECONDS,
 ) -> dict:
     """Execute *cmd* as a subprocess and return a normalised result dict."""
+    import asyncio
     try:
-        result = subprocess.run(
+        result = await asyncio.to_thread(
+            subprocess.run,
             cmd,
             input=stdin_data,
             capture_output=True,
@@ -166,6 +168,19 @@ def _docker_compile_cmd(image: str, mount_dir: str, compile_cmd: list[str]) -> l
 def is_azure_aci_configured() -> bool:
     """Check if Azure Container Instances configuration is present."""
     return bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
+
+async def container_exists(name: str) -> bool:
+    import asyncio
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["docker", "ps", "-q", "-f", f"name={name}"],
+            capture_output=True,
+            text=True
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +323,7 @@ def _execute_code_azure(
 # ---------------------------------------------------------------------------
 # Local Execution
 # ---------------------------------------------------------------------------
-def _execute_code_local(
+async def _execute_code_local(
     config: dict,
     source_code: str,
     stdin_input: Optional[str] = None,
@@ -334,7 +349,7 @@ def _execute_code_local(
 
         if compile_cmd:
             compile_docker_cmd = _docker_compile_cmd(image, tmp_dir, compile_cmd)
-            compile_result = _run_subprocess(compile_docker_cmd, timeout=TIMEOUT_SECONDS)
+            compile_result = await _run_subprocess(compile_docker_cmd, timeout=TIMEOUT_SECONDS)
 
             if compile_result["timed_out"] or compile_result["exit_code"] != 0:
                 return {
@@ -346,14 +361,17 @@ def _execute_code_local(
                 }
 
         run_docker_cmd = _docker_run_cmd(image, tmp_dir, run_cmd)
-        return _run_subprocess(run_docker_cmd, stdin_data=stdin_input, timeout=TIMEOUT_SECONDS)
+        return await _run_subprocess(run_docker_cmd, stdin_data=stdin_input, timeout=TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def execute_code(
+def _execute_wrapper(*args, **kwargs):
+    return _execute_code_azure(*args, **kwargs)
+
+async def execute_code(
     language: str,
     source_code: str,
     stdin_input: Optional[str] = None,
@@ -374,12 +392,13 @@ def execute_code(
 
     # Check if Azure Container Instances applies
     if is_azure_aci_configured():
-        return _execute_code_azure(config, source_code, stdin_input, interview_id=interview_id)
+        import asyncio
+        return await asyncio.to_thread(_execute_wrapper, config, source_code, stdin_input, interview_id)
     else:
-        return _execute_code_local(config, source_code, stdin_input)
+        return await _execute_code_local(config, source_code, stdin_input)
 
 
-def run_test_cases(
+async def run_test_cases(
     language: str,
     source_code: str,
     test_cases: list[dict],
@@ -392,7 +411,7 @@ def run_test_cases(
         stdin_input: str = tc.get("input", "")
         expected_output: str = tc.get("expected_output", "")
 
-        exec_result = execute_code(
+        exec_result = await execute_code(
             language=language,
             source_code=source_code,
             stdin_input=stdin_input,
