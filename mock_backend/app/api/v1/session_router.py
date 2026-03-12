@@ -424,6 +424,7 @@ async def start_section(
         logger.info(f"Creating coding session container for interview {session_id}")
         CodeContainerSessionService.create_session_container(str(session_id))
     
+    logger.info(f"Starting interview section of type: {section_type_to_start}")
     return await InterviewSessionSQLService.start_section(session, session_id, section_id_uuid, current_user.id)
 
 

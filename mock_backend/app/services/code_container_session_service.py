@@ -59,6 +59,17 @@ class CodeContainerSessionService:
         acr_user = getattr(settings, "AZURE_ACR_USERNAME", None)
         acr_pass = getattr(settings, "AZURE_ACR_PASSWORD", None)
 
+        # Debug logging for credentials (do NOT log password)
+        logger.info(f"ACR Server: {acr_server}")
+        logger.info(f"ACR Username Present: {bool(acr_user)}")
+        logger.info(f"ACR Password Present: {bool(acr_pass)}")
+
+        # Fail fast if credentials missing for ACR
+        if acr_server and (not acr_user or not acr_pass):
+            raise Exception(
+                "ACR server configured but credentials missing. Check AZURE_ACR_USERNAME and AZURE_ACR_PASSWORD in .env"
+            )
+
         lang_map = {
             "python3": "code-runner-python",
             "javascript": "code-runner-javascript",
@@ -66,8 +77,9 @@ class CodeContainerSessionService:
             "cpp": "code-runner-cpp",
         }
         image_name = lang_map.get(language, "code-runner-python")
-        image_base = f"{acr_server}/{image_name}:latest" if acr_server else f"{image_name}:latest"
-        image = image_base
+        image = f"{acr_server}/{image_name}:latest" if acr_server else f"{image_name}:latest"
+        
+        logger.info(f"Using container image: {image}")
 
         cg_name = f"code-runner-{interview_id}"
         container_name = "runner"
@@ -110,10 +122,10 @@ class CodeContainerSessionService:
             os_type=OperatingSystemTypes.linux,
             restart_policy="Never",
             tags={"creationTime": now_ts},
-            image_registry_credentials=registry_credentials if registry_credentials else None
+            image_registry_credentials=registry_credentials
         )
 
-        logger.info(f"✔ container created: {cg_name}")
+        logger.info(f"Creating container group {cg_name} using image {image}")
         poller = client.container_groups.begin_create_or_update(resource_group, cg_name, group)
         poller.result() # Wait until created
 
