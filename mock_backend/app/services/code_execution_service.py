@@ -235,7 +235,7 @@ def _execute_code_azure(
         if cg.instance_view and cg.instance_view.state != "Running":
             return {
                 "stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
-                "error": f"Container is not running. State: {cg.instance_view.state}"
+                "error": "Coding container not initialized. Start coding section first."
             }
         
         from azure.mgmt.containerinstance.models import ContainerExecRequest, ContainerExecRequestTerminalSize
@@ -249,6 +249,7 @@ def _execute_code_azure(
         )
         
         logger.info(f"✔ container reused: {cg_name} for execution.")
+        logger.info(f"Executing code inside container {cg_name}")
         resp = client.containers.execute_command(
             resource_group,
             cg_name,

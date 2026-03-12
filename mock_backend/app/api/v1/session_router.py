@@ -402,14 +402,27 @@ async def start_section(
 
     if payload.section_id:
         section_id_uuid = validate_uuid(payload.section_id)
+        section_type_to_start = payload.section_type
+        if not section_type_to_start:
+            sections = await InterviewSessionSQLService.get_sections(session, session_id, current_user.id)
+            for s in sections:
+                if str(s["id"]) == payload.section_id:
+                    section_type_to_start = s["section_type"]
+                    break
     elif payload.section_type:
         sections = await InterviewSessionSQLService.get_sections(session, session_id, current_user.id)
         section = next((s for s in sections if s["section_type"] == payload.section_type), None)
         if not section:
             raise HTTPException(status_code=404, detail="Section type not found")
         section_id_uuid = validate_uuid(section["id"])
+        section_type_to_start = payload.section_type
     else:
         raise HTTPException(status_code=400, detail="Must provide section_id or section_type")
+    
+    if section_type_to_start == "CODING":
+        from app.services.code_container_session_service import CodeContainerSessionService
+        logger.info(f"Creating coding session container for interview {session_id}")
+        CodeContainerSessionService.create_session_container(str(session_id))
     
     return await InterviewSessionSQLService.start_section(session, session_id, section_id_uuid, current_user.id)
 
