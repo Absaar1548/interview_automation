@@ -169,18 +169,34 @@ def is_azure_aci_configured() -> bool:
     """Check if Azure Container Instances configuration is present."""
     return bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
 
-async def container_exists(name: str) -> bool:
+async def get_container_state(name: str) -> str:
     import asyncio
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            ["docker", "ps", "-q", "-f", f"name={name}"],
-            capture_output=True,
-            text=True
-        )
-        return bool(result.stdout.strip())
-    except Exception:
-        return False
+    def _fetch_state():
+        logger.info(f"Checking container state for {name}")
+        if not is_azure_aci_configured():
+            return "NotFound"
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.mgmt.containerinstance import ContainerInstanceManagementClient
+            from azure.core.exceptions import ResourceNotFoundError
+            
+            credential = DefaultAzureCredential()
+            sub_id = settings.AZURE_SUBSCRIPTION_ID
+            client = ContainerInstanceManagementClient(credential, sub_id)
+            resource_group = settings.AZURE_ACI_RESOURCE_GROUP
+            
+            container_group = client.container_groups.get(resource_group, name)
+            state = container_group.instance_view.state if container_group.instance_view else "Unknown"
+            logger.info(f"Container state: {state}")
+            return state
+        except ResourceNotFoundError:
+            logger.info("Container state: NotFound")
+            return "NotFound"
+        except Exception as e:
+            logger.error(f"Error checking container state: {e}")
+            return "Error"
+            
+    return await asyncio.to_thread(_fetch_state)
 
 
 # ---------------------------------------------------------------------------

@@ -230,10 +230,22 @@ async def run_code(
         for tc in visible_tcs
     ]
 
-    from app.services.code_execution_service import container_exists
+    from app.services.code_execution_service import get_container_state
     
     container_name = f"code-runner-{request.interview_id}"
-    if not await container_exists(container_name):
+    state = await get_container_state(container_name)
+    
+    if state in ("Pending", "Creating"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Coding environment is still starting. Please wait a few seconds."
+        )
+    elif state in ("Failed", "Stopped"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Coding container failed to start."
+        )
+    elif state != "Running":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Coding container not initialized. Start coding section first."
@@ -350,10 +362,22 @@ async def submit_code(
         for tc in all_tcs
     ]
 
-    from app.services.code_execution_service import container_exists
+    from app.services.code_execution_service import get_container_state
     
     container_name = f"code-runner-{request.interview_id}"
-    if not await container_exists(container_name):
+    state = await get_container_state(container_name)
+    
+    if state in ("Pending", "Creating"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Coding environment is still starting. Please wait a few seconds."
+        )
+    elif state in ("Failed", "Stopped"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Coding container failed to start."
+        )
+    elif state != "Running":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Coding container not initialized. Start coding section first."
