@@ -23,7 +23,7 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_router import get_current_active_user
@@ -390,6 +390,7 @@ class StartSectionRequest(BaseModel):
 @router.post("/candidate/interview/start-section")
 async def start_section(
     payload: StartSectionRequest,
+    background_tasks: BackgroundTasks,
     x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
     current_user: User = Depends(_get_current_candidate),
     session: AsyncSession = Depends(get_db_session),
@@ -421,8 +422,8 @@ async def start_section(
     
     if section_type_to_start.lower() == "coding":
         from app.services.code_container_session_service import CodeContainerSessionService
-        logger.info(f"Creating coding session container for interview {session_id}")
-        CodeContainerSessionService.create_session_container(str(session_id))
+        logger.info(f"Triggering background creation of coding session container for interview {session_id}")
+        background_tasks.add_task(CodeContainerSessionService.create_session_container, str(session_id))
     
     logger.info(f"Starting interview section of type: {section_type_to_start}")
     return await InterviewSessionSQLService.start_section(session, session_id, section_id_uuid, current_user.id)

@@ -276,13 +276,21 @@ def _execute_code_azure(
         from websockets.exceptions import ConnectionClosed
         import re
         
+        # ACI execute_command often fails with nested quotes in a single string.
+        # Passing a list of arguments is the standard way to avoid shell splitting issues.
+        exec_command = [
+            "/bin/sh",
+            "-c",
+            f"printf '%s' '{b64_cmd}' | base64 -d | sh"
+        ]
+        
         exec_req = ContainerExecRequest(
-            command=final_entrypoint,
+            command=exec_command,
             terminal_size=ContainerExecRequestTerminalSize(rows=24, cols=80)
         )
         
         logger.info(f"✔ container reused: {cg_name} for execution.")
-        logger.info(f"Executing code inside container {cg_name}")
+        logger.info(f"Executing code inside container {cg_name} via ACI Exec")
         resp = client.containers.execute_command(
             resource_group,
             cg_name,
@@ -312,21 +320,31 @@ def _execute_code_azure(
         exit_code = -1
         timed_out = False
         
+        # Parse output for our custom exit code marker
         match = re.search(r"__EXIT_CODE__(\d+)", logs)
         if match:
             exit_code = int(match.group(1))
             logs = logs[:match.start()].strip()
+            # If we see the marker, we know the command finished.
+            # If the marker says 0, it's stdout. If not, it's stderr.
         else:
-            if len(logs) == 0 or "Terminated" in logs:
+            # Marker missing: likely a timeout or a crash of the wrapper shell
+            if "Terminated" in logs or "timeout" in logs or not logs:
                 timed_out = True
             
         logger.info(f"✔ code executed in container {cg_name} (exit_code: {exit_code}, timed_out: {timed_out})")
+        
+        # Normalize result
+        # If we have an exit_code 137, that's almost always an OOM or a hard timeout
+        if exit_code == 137:
+            timed_out = True
+            
         return {
             "stdout": logs if exit_code == 0 else "",
-            "stderr": logs if exit_code != 0 else "",
+            "stderr": logs if exit_code != 0 and exit_code != -1 else "",
             "exit_code": exit_code,
             "timed_out": timed_out,
-            "error": "Timeout or error in ACI" if exit_code != 0 and not logs else None,
+            "error": "Execution timed out or container was terminated." if timed_out else (None if exit_code == 0 else "Execution failed with non-zero exit code."),
         }
     except Exception as e:
         logger.exception("Azure Exec on Running Container Error")

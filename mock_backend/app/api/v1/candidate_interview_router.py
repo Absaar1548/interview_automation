@@ -10,7 +10,7 @@ POST /{interview_id}/start – Creates or resumes an interview session (generate
 import logging
 import uuid
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_router import get_current_active_user
@@ -101,11 +101,13 @@ from app.services.code_container_session_service import CodeContainerSessionServ
 )
 async def start_coding_session(
     interview_id: str,
+    background_tasks: BackgroundTasks,
     current_candidate: User = Depends(get_current_candidate),
 ):
     try:
-        CodeContainerSessionService.create_session_container(interview_id)
-        return {"status": "success", "message": "Coding session started"}
+        logger.info(f"Triggering background creation of coding session container for interview {interview_id}")
+        background_tasks.add_task(CodeContainerSessionService.create_session_container, interview_id)
+        return {"status": "success", "message": "Coding session initialization triggered"}
     except Exception as e:
         logger.error(f"Error starting coding session container: {e}", exc_info=True)
         raise HTTPException(
@@ -122,11 +124,13 @@ async def start_coding_session(
 )
 async def end_coding_session(
     interview_id: str,
+    background_tasks: BackgroundTasks,
     current_candidate: User = Depends(get_current_candidate),
 ):
     try:
-        CodeContainerSessionService.delete_session_container(interview_id)
-        return {"status": "success", "message": "Coding session ended"}
+        logger.info(f"Triggering background deletion of coding session container for interview {interview_id}")
+        background_tasks.add_task(CodeContainerSessionService.delete_session_container, interview_id)
+        return {"status": "success", "message": "Coding session termination triggered"}
     except Exception as e:
         logger.error(f"Error ending coding session container: {e}", exc_info=True)
         raise HTTPException(
