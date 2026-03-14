@@ -13,14 +13,12 @@ class Settings(BaseSettings):
     OPENAI_API_BASE: str = os.getenv("OPENAI_API_BASE", "")  # e.g. Azure: https://xxx.openai.azure.com/
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # or gpt-4, etc.
 
-    # Azure Container Instances for Code Execution
-    AZURE_ACI_RESOURCE_GROUP: str = os.getenv("AZURE_ACI_RESOURCE_GROUP", "")
-    AZURE_ACI_LOCATION: str = os.getenv("AZURE_ACI_LOCATION", "eastus")
-    AZURE_SUBSCRIPTION_ID: str = os.getenv("AZURE_SUBSCRIPTION_ID", "")
-    AZURE_ACR_SERVER: str = os.getenv("AZURE_ACR_SERVER", "") # e.g. myregistry.azurecr.io
-    AZURE_ACR_USERNAME: str = os.getenv("AZURE_ACR_USERNAME", "")
-    AZURE_ACR_PASSWORD: str = os.getenv("AZURE_ACR_PASSWORD", "")
-    USE_AZURE_ACI: str = os.getenv("USE_AZURE_ACI", "false")
+    # Piston API for Code Execution (Public endpoint is now restricted - consider self-hosting)
+    PISTON_API_URL: str = os.getenv("PISTON_API_URL", "https://emkc.org/api/v2/piston/execute")
+    
+    # Judge0 API for Code Execution (Alternative)
+    JUDGE0_API_URL: str = os.getenv("JUDGE0_API_URL", "https://ce.judge0.com")
+    JUDGE0_API_KEY: str = os.getenv("JUDGE0_API_KEY", "")
 
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

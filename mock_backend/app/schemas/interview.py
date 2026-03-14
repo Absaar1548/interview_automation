@@ -1,6 +1,6 @@
 import uuid
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any, Literal
+from typing import Optional, List, Any, Literal, Union
 from datetime import datetime
 
 
@@ -80,7 +80,7 @@ class CodingProblemItem(BaseModel):
     title: str
     difficulty: str
     description: Optional[str] = None
-    starter_code: Optional[dict] = None
+    starter_code: Optional[Union[dict, str]] = None
 
 class CodingSection(BaseModel):
     problems: List[CodingProblemItem]

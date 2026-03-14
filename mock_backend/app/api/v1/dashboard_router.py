@@ -115,12 +115,20 @@ async def get_interview_report(
         if not interview:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
         
-        # 2️⃣ If report_json is missing
+        # 2️⃣ If report_json is missing, try to generate it
         if not interview.report_json:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, 
-                detail="Report has not been generated yet. Please complete the interview first."
-            )
+            try:
+                report = await report_generation_service.generate_interview_report(
+                    session=session,
+                    interview_id=interview_id
+                )
+                return report
+            except Exception as e:
+                logger.error(f"Failed to generate report on-demand: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, 
+                    detail="Report could not be generated. Ensure the interview session is valid."
+                )
         
         # 3️⃣ Otherwise return stored report
         return interview.report_json

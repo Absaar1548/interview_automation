@@ -14,33 +14,10 @@ from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-try:
-    from azure.identity import DefaultAzureCredential
-    from azure.mgmt.containerinstance import ContainerInstanceManagementClient
-    from azure.mgmt.containerinstance.models import (
-        ContainerGroup,
-        Container,
-        ContainerPort,
-        EnvironmentVariable,
-        ResourceRequests,
-        ResourceRequirements,
-        OperatingSystemTypes,
-        ImageRegistryCredential,
-    )
-    AZURE_SDK_AVAILABLE = True
-except ImportError:
-    AZURE_SDK_AVAILABLE = False
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 TIMEOUT_SECONDS = 10
-
-# Piston API Configuration
-PISTON_API_URL = os.getenv(
-    "PISTON_API_URL",
-    "https://emkc.org/api/v2/piston/execute"  # Free public API endpoint
-)
 
 # Language mapping: your language names -> Piston language names
 LANGUAGE_MAPPING = {
@@ -97,127 +74,151 @@ def _get_file_extension(language: str) -> str:
     return extensions.get(language, "txt")
 
 
-def is_azure_aci_configured() -> bool:
-    """Check if Azure Container Instances configuration is present."""
-    is_enabled = str(getattr(settings, "USE_AZURE_ACI", "false")).lower() == "true"
-    has_config = bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
-    return is_enabled and has_config
+# Piston API Configuration
+PISTON_API_URL = os.getenv(
+    "PISTON_API_URL",
+    "https://emkc.org/api/v2/piston/execute"  # Free public API endpoint
+)
+
+# Judge0 API Configuration
+JUDGE0_API_URL = os.getenv("JUDGE0_API_URL", "https://ce.judge0.com")
+JUDGE0_API_KEY = os.getenv("JUDGE0_API_KEY", "")
+
+# Judge0 Language IDs
+JUDGE0_LANGUAGE_MAPPING = {
+    "python3": 71,
+    "python": 71,
+    "javascript": 63,
+    "js": 63,
+    "java": 62,
+    "cpp": 54,
+    "c++": 54,
+    "c": 50,
+    "csharp": 51,
+    "c#": 51,
+    "go": 60,
+    "rust": 73,
+    "ruby": 72,
+    "php": 68,
+    "typescript": 74,
+    "ts": 74,
+}
+
+
+async def _execute_piston(language: str, source_code: str, stdin_input: Optional[str] = None) -> Dict[str, Any]:
+    """Execute code using Piston API."""
+    lang = language.lower().strip()
+    piston_lang = LANGUAGE_MAPPING.get(lang)
+    
+    if not piston_lang:
+        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": f"Unsupported language: {language}"}
+    
+    version = LANGUAGE_VERSIONS.get(piston_lang, "*")
+    file_extension = _get_file_extension(piston_lang)
+    
+    payload = {
+        "language": piston_lang,
+        "version": version,
+        "files": [{"name": f"main.{file_extension}", "content": source_code}],
+        "stdin": stdin_input or "",
+        "run_timeout": TIMEOUT_SECONDS * 1000,
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(PISTON_API_URL, json=payload)
+            
+            if response.status_code == 401:
+                return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": "PISTON_RESTRICTED"}
+                
+            response.raise_for_status()
+            result = response.json()
+            run_result = result.get("run", {})
+            
+            stdout = run_result.get("output", "")
+            stderr = run_result.get("stderr", "")
+            exit_code = run_result.get("code", 0)
+            signal = run_result.get("signal")
+            timed_out = signal in ["SIGKILL", "SIGTERM"]
+            
+            error = None
+            if timed_out:
+                error = f"Execution timed out after {TIMEOUT_SECONDS} seconds."
+            elif exit_code != 0:
+                error = stderr if stderr else f"Program exited with code {exit_code}"
+                
+            return {"stdout": stdout, "stderr": stderr, "exit_code": exit_code, "timed_out": timed_out, "error": error}
+    except Exception as e:
+        logger.error(f"Piston error: {e}")
+        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": str(e)}
+
+
+async def _execute_judge0(language: str, source_code: str, stdin_input: Optional[str] = None) -> Dict[str, Any]:
+    """Execute code using Judge0 API."""
+    lang = language.lower().strip()
+    judge0_id = JUDGE0_LANGUAGE_MAPPING.get(lang)
+    
+    if not judge0_id:
+        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": f"Unsupported language: {language}"}
+    
+    url = f"{JUDGE0_API_URL}/submissions?base64_encoded=false&wait=true"
+    headers = {}
+    if JUDGE0_API_KEY:
+        headers["X-RapidAPI-Key"] = JUDGE0_API_KEY
+        headers["X-RapidAPI-Host"] = JUDGE0_API_URL.split("//")[-1]
+
+    payload = {
+        "source_code": source_code,
+        "language_id": judge0_id,
+        "stdin": stdin_input or "",
+        "cpu_time_limit": TIMEOUT_SECONDS,
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+            
+            # Judge0 status: 3=Accepted, 4=Wrong Answer, 5=Time Limit Exceeded, 6=Compilation Error, etc.
+            status_id = result.get("status", {}).get("id")
+            stdout = result.get("stdout") or ""
+            stderr = result.get("stderr") or result.get("compile_output") or ""
+            timed_out = status_id == 5
+            
+            exit_code = 0 if status_id == 3 else 1
+            error = None
+            if timed_out:
+                error = f"Execution timed out after {TIMEOUT_SECONDS} seconds."
+            elif status_id != 3:
+                error = result.get("status", {}).get("description", "Execution failed")
+                if stderr:
+                    error += f": {stderr}"
+            
+            return {"stdout": stdout, "stderr": stderr, "exit_code": exit_code, "timed_out": timed_out, "error": error}
+    except Exception as e:
+        logger.error(f"Judge0 error: {e}")
+        return {"stdout": "", "stderr": "", "exit_code": -1, "timed_out": False, "error": str(e)}
+
 
 async def execute_code(
     language: str,
     source_code: str,
     stdin_input: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Execute code using Piston API.
+    """Execute code using available provider (Judge0 or Piston)."""
     
-    Parameters
-    ----------
-    language    : Programming language (e.g., "python3", "javascript", "java", "cpp")
-    source_code : The source code to execute
-    stdin_input : Optional stdin input for the program
+    # Try Piston first IF it's likely a custom/local endpoint
+    is_piston_public = "emkc.org" in PISTON_API_URL
     
-    Returns
-    -------
-    {
-        "stdout"   : str,
-        "stderr"   : str,
-        "exit_code": int,
-        "timed_out": bool,
-        "error"    : str | None,
-    }
-    """
-    # Map language name to Piston format
-    lang = language.lower().strip()
-    piston_lang = LANGUAGE_MAPPING.get(lang)
-    
-    if not piston_lang:
-        supported = ", ".join(sorted(set(LANGUAGE_MAPPING.keys())))
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": False,
-            "error": str(e),
-        }
-    
-    version = LANGUAGE_VERSIONS.get(piston_lang, "*")
-    file_extension = _get_file_extension(piston_lang)
-    
-    # Prepare Piston API request payload
-    payload = {
-        "language": piston_lang,
-        "version": version,
-        "files": [
-            {
-                "name": f"main.{file_extension}",
-                "content": source_code,
-            }
-        ],
-        "stdin": stdin_input or "",
-        "run_timeout": TIMEOUT_SECONDS * 1000,  # Piston uses milliseconds
-    }
-    
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(PISTON_API_URL, json=payload)
-            response.raise_for_status()
-            result = response.json()
+    if not is_piston_public:
+        res = await _execute_piston(language, source_code, stdin_input)
+        if res.get("error") != "PISTON_RESTRICTED":
+            return res
             
-            # Piston API response structure
-            run_result = result.get("run", {})
-            
-            # Extract output and error information
-            stdout = run_result.get("output", "")
-            stderr = run_result.get("stderr", "")
-            exit_code = run_result.get("code", 0)
-            
-            # Check if execution timed out (Piston returns signal "SIGKILL" on timeout)
-            signal = run_result.get("signal")
-            timed_out = signal == "SIGKILL" or signal == "SIGTERM"
-            
-            # Determine if there was an error
-            error = None
-            if timed_out:
-                error = f"Execution timed out after {TIMEOUT_SECONDS} seconds."
-            elif exit_code != 0:
-                error = stderr if stderr else f"Program exited with code {exit_code}"
-            
-            return {
-                "stdout": stdout,
-                "stderr": stderr,
-                "exit_code": exit_code,
-                "timed_out": timed_out,
-                "error": error,
-            }
-            
-    except httpx.TimeoutException:
-        logger.warning(f"Piston API request timed out for language: {language}")
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": True,
-            "error": f"Request to Piston API timed out after 15 seconds.",
-        }
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Piston API HTTP error: {e.response.status_code} - {e.response.text}")
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": False,
-            "error": f"Piston API error: HTTP {e.response.status_code}",
-        }
-    except Exception as exc:
-        logger.exception(f"Unexpected error calling Piston API: {exc}")
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": False,
-            "error": f"Unexpected error: {str(exc)}",
-        }
+    # Fallback to Judge0
+    logger.info("Using Judge0 as code execution provider")
+    return await _execute_judge0(language, source_code, stdin_input)
 
 
 async def run_test_cases(
@@ -264,7 +265,6 @@ async def run_test_cases(
             language=language,
             source_code=source_code,
             stdin_input=stdin_input,
-            interview_id=interview_id,
         )
         
         # Normalize output for comparison

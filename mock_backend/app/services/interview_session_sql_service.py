@@ -63,7 +63,30 @@ def _generate_mock_result(interview_id: uuid.UUID) -> Dict[str, Any]:
     }
 
 
+
 class InterviewSessionSQLService:
+
+    @staticmethod
+    def _normalize_starter_code(starter_code: Any) -> Dict[str, str]:
+        """Normalize starter code to a dictionary with standard language keys."""
+        if not starter_code:
+            return {}
+        
+        normalized = {}
+        if isinstance(starter_code, dict):
+            normalized = starter_code
+        elif isinstance(starter_code, str):
+            normalized = {"python3": starter_code}
+        else:
+            normalized = {"python3": str(starter_code)}
+        
+        # Cross-map python and python3 for frontend compatibility
+        if "python" in normalized and "python3" not in normalized:
+            normalized["python3"] = normalized["python"]
+        elif "python3" in normalized and "python" not in normalized:
+            normalized["python"] = normalized["python3"]
+            
+        return normalized
 
     @staticmethod
     async def _get_session_and_interview(
@@ -630,7 +653,7 @@ class InterviewSessionSQLService:
                     "title": coding_problem.title,
                     "difficulty": coding_problem.difficulty,
                     "description": coding_problem.description,
-                    "starter_code": coding_problem.starter_code or {},
+                    "starter_code": InterviewSessionSQLService._normalize_starter_code(coding_problem.starter_code),
                     "examples": [
                         {"input": tc.input, "expected_output": tc.expected_output}
                         for tc in visible_tcs
@@ -847,12 +870,19 @@ class InterviewSessionSQLService:
                 if all_completed:
                     return_state = "COMPLETED"
                     
-                    score_stmt = select(func.avg(InterviewResponse.ai_score)).where(
+                    total_stmt = select(func.count(InterviewSessionQuestion.id)).where(
+                        InterviewSessionQuestion.interview_session_id == session_id
+                    )
+                    total_res = await session.execute(total_stmt)
+                    total_q = total_res.scalar() or 1
+                    
+                    sum_stmt = select(func.sum(InterviewResponse.ai_score)).where(
                         InterviewResponse.session_id == session_id
                     )
-                    avg_score_result = await session.execute(score_stmt)
-                    avg_score = avg_score_result.scalar() or 0.0
-                    overall_score = (avg_score / 10.0) * 100.0
+                    sum_res = await session.execute(sum_stmt)
+                    total_score_sum = sum_res.scalar() or 0.0
+                    
+                    overall_score = total_score_sum / total_q
                     
                     session_obj.status = "completed"
                     session_obj.completed_at = now
@@ -1134,12 +1164,19 @@ class InterviewSessionSQLService:
             now = datetime.now(timezone.utc)
             
             # 1️⃣ Calculate average score
-            score_stmt = select(func.avg(InterviewResponse.ai_score)).where(
+            total_stmt = select(func.count(InterviewSessionQuestion.id)).where(
+                InterviewSessionQuestion.interview_session_id == session_id
+            )
+            total_res = await session.execute(total_stmt)
+            total_q = total_res.scalar() or 1
+            
+            sum_stmt = select(func.sum(InterviewResponse.ai_score)).where(
                 InterviewResponse.session_id == session_id
             )
-            avg_score_result = await uow.session.execute(score_stmt)
-            avg_score = avg_score_result.scalar() or 0.0
-            overall_score = (avg_score / 10.0) * 100.0
+            sum_res = await session.execute(sum_stmt)
+            total_score_sum = sum_res.scalar() or 0.0
+            
+            overall_score = total_score_sum / total_q
 
             # 2️⃣ Update interview fields
             session_obj.status = "completed"

@@ -1,6 +1,6 @@
 import uuid
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Union
 from app.db.sql.models.question import DifficultyEnum, CategoryEnum
 
 class TemplatePreviewQuestion(BaseModel):
@@ -20,7 +20,7 @@ class CodingSectionProblemPreview(BaseModel):
     problem_id: uuid.UUID
     title: str
     difficulty: str
-    starter_code: Optional[dict] = None
+    starter_code: Optional[Union[dict, str]] = None
 
 class CodingSectionPreview(BaseModel):
     problems: List[CodingSectionProblemPreview]

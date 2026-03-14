@@ -360,23 +360,29 @@ class QuestionGeneratorService:
                 for item in coding_items:
                     if item.coding_problem:
                         p = item.coding_problem
-                        # Convert starter_code from dict to string
-                        starter_code_str = ""
+                        # Ensure starter_code is a dict for the frontend (lang -> code)
+                        starter_code_obj = {}
                         if p.starter_code:
                             if isinstance(p.starter_code, dict):
-                                # If it's a dict with language keys, use python as default or first available
-                                starter_code_str = p.starter_code.get("python") or p.starter_code.get("javascript") or (list(p.starter_code.values())[0] if p.starter_code else "")
+                                starter_code_obj = p.starter_code
                             elif isinstance(p.starter_code, str):
-                                starter_code_str = p.starter_code
+                                # Wrap string in a default language dict
+                                starter_code_obj = {"python3": p.starter_code}
                             else:
-                                starter_code_str = str(p.starter_code)
+                                starter_code_obj = {"python3": str(p.starter_code)}
+                        
+                        # Normalize python/python3 keys
+                        if "python" in starter_code_obj and "python3" not in starter_code_obj:
+                            starter_code_obj["python3"] = starter_code_obj["python"]
+                        elif "python3" in starter_code_obj and "python" not in starter_code_obj:
+                            starter_code_obj["python"] = starter_code_obj["python3"]
                         
                         coding_problems_formatted.append({
                             "problem_id": str(p.id),
                             "title": p.title,
                             "difficulty": p.difficulty,
                             "description": p.description,
-                            "starter_code": starter_code_str
+                            "starter_code": starter_code_obj
                         })
             
             return {
@@ -1315,23 +1321,29 @@ Return ONLY the JSON object."""
                 
             p = random.choice(available)
             
-            # Convert starter_code from dict to string
-            starter_code_str = ""
+            # Ensure starter_code is a dict for the frontend (lang -> code)
+            starter_code_obj = {}
             if p.starter_code:
                 if isinstance(p.starter_code, dict):
-                    # If it's a dict with language keys, use python as default or first available
-                    starter_code_str = p.starter_code.get("python") or p.starter_code.get("javascript") or (list(p.starter_code.values())[0] if p.starter_code else "")
+                    starter_code_obj = p.starter_code
                 elif isinstance(p.starter_code, str):
-                    starter_code_str = p.starter_code
+                    # Wrap string in a default language dict
+                    starter_code_obj = {"python3": p.starter_code}
                 else:
-                    starter_code_str = str(p.starter_code)
+                    starter_code_obj = {"python3": str(p.starter_code)}
+            
+            # Normalize python/python3 keys
+            if "python" in starter_code_obj and "python3" not in starter_code_obj:
+                starter_code_obj["python3"] = starter_code_obj["python"]
+            elif "python3" in starter_code_obj and "python" not in starter_code_obj:
+                starter_code_obj["python"] = starter_code_obj["python3"]
             
             return {
                 "problem_id": str(p.id),
                 "title": p.title,
                 "difficulty": p.difficulty,
                 "description": p.description,
-                "starter_code": starter_code_str
+                "starter_code": starter_code_obj
             }
         except Exception as e:
             logger.error(f"Error getting single replacement coding problem from bank: {e}")

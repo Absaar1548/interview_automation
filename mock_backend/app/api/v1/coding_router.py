@@ -11,7 +11,7 @@ POST /coding/submit    – Run code against ALL test cases and persist submissio
 import uuid
 import random
 import logging
-from typing import Optional, List
+from typing import Optional, List, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -32,15 +32,36 @@ router = APIRouter(prefix="/coding", tags=["coding"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _parse_uuid(value: str, field_name: str = "id") -> uuid.UUID:
-    """Convert a string to UUID, raising HTTP 422 on failure."""
+def _parse_uuid(id_str: str, field_name: str) -> uuid.UUID:
     try:
-        return uuid.UUID(value)
-    except (ValueError, AttributeError):
+        return uuid.UUID(id_str)
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid UUID for '{field_name}': {value}",
+            detail=f"Invalid format for '{field_name}': {id_str}",
         )
+
+
+def _normalize_starter_code(starter_code: Any) -> Dict[str, str]:
+    """Normalize starter code to a dictionary with standard language keys."""
+    if not starter_code:
+        return {}
+    
+    normalized = {}
+    if isinstance(starter_code, dict):
+        normalized = starter_code
+    elif isinstance(starter_code, str):
+        normalized = {"python3": starter_code}
+    else:
+        normalized = {"python3": str(starter_code)}
+    
+    # Cross-map python and python3 for frontend compatibility
+    if "python" in normalized and "python3" not in normalized:
+        normalized["python3"] = normalized["python"]
+    elif "python3" in normalized and "python" not in normalized:
+        normalized["python"] = normalized["python3"]
+        
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +107,7 @@ class ProblemResponse(BaseModel):
     description: str
     difficulty: str
     time_limit_sec: int
-    starter_code: dict
+    starter_code: Union[dict, str]
     examples: List[dict]
 
 
@@ -170,8 +191,11 @@ async def get_coding_problem(
         description=problem.description,
         difficulty=problem.difficulty,
         time_limit_sec=problem.time_limit_sec,
-        starter_code=problem.starter_code or {},
-        examples=examples,
+        starter_code=_normalize_starter_code(problem.starter_code),
+        examples=[
+            {"input": tc.input, "expected_output": tc.expected_output}
+            for tc in examples
+        ],
     )
 
 
@@ -230,34 +254,12 @@ async def run_code(
         for tc in visible_tcs
     ]
 
-    from app.services.code_execution_service import get_container_state, is_azure_aci_configured
-    
-    if is_azure_aci_configured():
-        container_name = f"code-runner-{request.interview_id}"
-        state = await get_container_state(container_name)
-        
-        if state in ("Pending", "Creating"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Coding environment is still starting. Please wait a few seconds."
-            )
-        elif state in ("Failed", "Stopped"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Coding container failed to start."
-            )
-        elif state != "Running":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Coding container not initialized. Start coding section first."
-            )
 
     # Execute (now async background run)
     raw_results = await run_test_cases(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,
-        interview_id=request.interview_id,
     )
 
     results = [
@@ -363,34 +365,12 @@ async def submit_code(
         for tc in all_tcs
     ]
 
-    from app.services.code_execution_service import get_container_state, is_azure_aci_configured
-    
-    if is_azure_aci_configured():
-        container_name = f"code-runner-{request.interview_id}"
-        state = await get_container_state(container_name)
-        
-        if state in ("Pending", "Creating"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Coding environment is still starting. Please wait a few seconds."
-            )
-        elif state in ("Failed", "Stopped"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Coding container failed to start."
-            )
-        elif state != "Running":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Coding container not initialized. Start coding section first."
-            )
 
     # Execute against all test cases
     raw_results = await run_test_cases(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,
-        interview_id=request.interview_id,
     )
 
     results = [

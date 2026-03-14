@@ -92,49 +92,5 @@ async def start_interview(
     return await InterviewSQLService.start_interview(session, validated_interview_id, candidate_id)
 
 
-# ─── POST /{interview_id}/coding/start ────────────────────────────────────────
-from app.services.code_container_session_service import CodeContainerSessionService
 
-@router.post(
-    "/{interview_id}/coding/start",
-    summary="Start coding session, initializing the session container",
-)
-async def start_coding_session(
-    interview_id: str,
-    background_tasks: BackgroundTasks,
-    current_candidate: User = Depends(get_current_candidate),
-):
-    try:
-        logger.info(f"Triggering background creation of coding session container for interview {interview_id}")
-        background_tasks.add_task(CodeContainerSessionService.create_session_container, interview_id)
-        return {"status": "success", "message": "Coding session initialization triggered"}
-    except Exception as e:
-        logger.error(f"Error starting coding session container: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to initialize coding environment"
-        )
-
-
-# ─── POST /{interview_id}/coding/end ──────────────────────────────────────────
-
-@router.post(
-    "/{interview_id}/coding/end",
-    summary="End coding session, cleaning up the session container",
-)
-async def end_coding_session(
-    interview_id: str,
-    background_tasks: BackgroundTasks,
-    current_candidate: User = Depends(get_current_candidate),
-):
-    try:
-        logger.info(f"Triggering background deletion of coding session container for interview {interview_id}")
-        background_tasks.add_task(CodeContainerSessionService.delete_session_container, interview_id)
-        return {"status": "success", "message": "Coding session termination triggered"}
-    except Exception as e:
-        logger.error(f"Error ending coding session container: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to cleanup coding environment"
-        )
 

@@ -14,10 +14,6 @@ from app.db.sql.session import AsyncSessionLocal, test_database_connection
 import logging
 from pathlib import Path
 
-# Suppress noisy Azure SDK logs
-logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
-logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 # Load .env file explicitly before importing services
 try:
@@ -47,24 +43,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)   
 
-import asyncio
-from app.services.code_container_session_service import CodeContainerSessionService
 
-async def aci_cleanup_task():
-    logger.info("Starting ACI background cleanup task...")
-    while True:
-        try:
-            # Network client calls in SDK are synchronous, so we run them in a separate thread
-            await asyncio.to_thread(CodeContainerSessionService.cleanup_old_containers)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error(f"Error in background ACI cleanup: {e}")
-        
-        try:
-            await asyncio.sleep(300)  # Every 5 minutes
-        except asyncio.CancelledError:
-            break
 
 @asynccontextmanager  
 async def lifespan(app: FastAPI):
@@ -72,17 +51,9 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing application and checking database connection...")
     await test_database_connection()
 
-    # ── Step 2: Start background tasks ────────────────────────────────────────
-    cleanup_task = asyncio.create_task(aci_cleanup_task())
-
     yield
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Application shutting down.")
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
 
 app = FastAPI(title="AI Interview Automation Mock Backend", lifespan=lifespan)
 
