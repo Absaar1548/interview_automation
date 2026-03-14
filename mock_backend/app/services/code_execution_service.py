@@ -1,36 +1,16 @@
 """
 Code Execution Service
 ----------------------
-<<<<<<< HEAD
-Runs candidate source code inside isolated Docker containers (Local) or Azure Container Instances (ACI).
-
-Security model (Local):
-  - Network disabled (--network none)
-  - Memory capped at 256 MB
-  - CPU capped at 1 core
-  - PID limit of 50
-  - Container removed after execution (--rm)
-  - Hard timeout of 10 seconds per run
-=======
 Runs candidate source code using Piston API (free public endpoint).
 
 Uses the public Piston API at https://emkc.org/api/v2/piston/execute
 for secure, isolated code execution without requiring Docker or local infrastructure.
->>>>>>> 1153a7b (uising piston)
 """
 
 import os
 import logging
-<<<<<<< HEAD
-import base64
-import uuid
-import time
-from typing import Optional
-from app.core.config import settings
-=======
 import httpx
 from typing import Optional, List, Dict, Any
->>>>>>> 1153a7b (uising piston)
 
 logger = logging.getLogger(__name__)
 
@@ -56,124 +36,6 @@ except ImportError:
 # ---------------------------------------------------------------------------
 TIMEOUT_SECONDS = 10
 
-<<<<<<< HEAD
-# ---------------------------------------------------------------------------
-# Per-language configuration
-# ---------------------------------------------------------------------------
-# Each entry defines:
-#   image       – Docker image to use (must be pre-built on the host for local, or ACR for Azure)
-#   filename    – name given to the source file inside /code/
-#   compile_cmd – shell tokens run before the program (None = interpreted)
-#   run_cmd     – shell tokens used to execute the program
-# ---------------------------------------------------------------------------
-LANGUAGE_CONFIG: dict[str, dict] = {
-    "python3": {
-        "image": "code-runner-python",
-        "filename": "solution.py",
-        "compile_cmd": None,
-        "run_cmd": ["python3", "/code/solution.py"],
-    },
-    "javascript": {
-        "image": "code-runner-javascript",
-        "filename": "solution.js",
-        "compile_cmd": None,
-        "run_cmd": ["node", "/code/solution.js"],
-    },
-    "java": {
-        "image": "code-runner-java",
-        "filename": "Solution.java",
-        "compile_cmd": ["javac", "/code/Solution.java"],
-        "run_cmd": ["java", "-cp", "/code", "Solution"],
-    },
-    "cpp": {
-        "image": "code-runner-cpp",
-        "filename": "solution.cpp",
-        "compile_cmd": ["g++", "-O2", "-o", "/code/solution", "/code/solution.cpp"],
-        "run_cmd": ["/code/solution"],
-    },
-}
-
-# ---------------------------------------------------------------------------
-# Base Docker flags applied to every container run (LOCAL ONLY)
-# ---------------------------------------------------------------------------
-_DOCKER_BASE_FLAGS = [
-    "--rm",
-    "-i",
-    "--network", "none",
-    f"--memory={MEMORY_LIMIT}",
-    "--cpus=1",
-    "--pids-limit=50",
-]
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-async def _run_subprocess(
-    cmd: list[str],
-    stdin_data: Optional[str] = None,
-    timeout: int = TIMEOUT_SECONDS,
-) -> dict:
-    """Execute *cmd* as a subprocess and return a normalised result dict."""
-    import asyncio
-    try:
-        result = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            input=stdin_data,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
-            "timed_out": False,
-            "error": None,
-        }
-    except subprocess.TimeoutExpired:
-        logger.warning("Subprocess timed out: %s", cmd)
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": True,
-            "error": f"Execution timed out after {timeout} seconds.",
-        }
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Unexpected error running subprocess: %s", exc)
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": False,
-            "error": str(exc),
-        }
-
-
-def _docker_run_cmd(image: str, mount_dir: str, run_cmd: list[str]) -> list[str]:
-    """Build the full ``docker run`` command list."""
-    return [
-        "docker", "run",
-        *_DOCKER_BASE_FLAGS,
-        "-v", f"{mount_dir}:/code:ro",  # mount source dir as read-only
-        image,
-        *run_cmd,
-    ]
-
-
-def _docker_compile_cmd(image: str, mount_dir: str, compile_cmd: list[str]) -> list[str]:
-    """Build a ``docker run`` command for compilation."""
-    return [
-        "docker", "run",
-        *_DOCKER_BASE_FLAGS,
-        "-v", f"{mount_dir}:/code",  # read-write for compiler output
-        image,
-        *compile_cmd,
-    ]
-=======
 # Piston API Configuration
 PISTON_API_URL = os.getenv(
     "PISTON_API_URL",
@@ -233,7 +95,6 @@ def _get_file_extension(language: str) -> str:
         "typescript": "ts",
     }
     return extensions.get(language, "txt")
->>>>>>> 1153a7b (uising piston)
 
 
 def is_azure_aci_configured() -> bool:
@@ -242,190 +103,6 @@ def is_azure_aci_configured() -> bool:
     has_config = bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
     return is_enabled and has_config
 
-<<<<<<< HEAD
-async def get_container_state(name: str) -> str:
-    import asyncio
-    def _fetch_state():
-        logger.info(f"Checking container state for {name}")
-        if not is_azure_aci_configured():
-            return "NotFound"
-        try:
-            from azure.identity import DefaultAzureCredential
-            from azure.mgmt.containerinstance import ContainerInstanceManagementClient
-            from azure.core.exceptions import ResourceNotFoundError
-            
-            credential = DefaultAzureCredential()
-            sub_id = settings.AZURE_SUBSCRIPTION_ID
-            client = ContainerInstanceManagementClient(credential, sub_id)
-            resource_group = settings.AZURE_ACI_RESOURCE_GROUP
-            
-            container_group = client.container_groups.get(resource_group, name)
-            state = container_group.instance_view.state if container_group.instance_view else "Unknown"
-            logger.info(f"Container state: {state}")
-            return state
-        except ResourceNotFoundError:
-            logger.info("Container state: NotFound")
-            return "NotFound"
-        except Exception as e:
-            logger.error(f"Error checking container state: {e}")
-            return "Error"
-            
-    return await asyncio.to_thread(_fetch_state)
-
-
-# ---------------------------------------------------------------------------
-# Azure Execution
-# ---------------------------------------------------------------------------
-def _execute_code_azure(
-    config: dict,
-    source_code: str,
-    stdin_input: Optional[str] = None,
-    interview_id: Optional[str] = None,
-) -> dict:
-    if not AZURE_SDK_AVAILABLE:
-        return {
-            "stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
-            "error": "Azure AD / ACI SDKs not installed. Please install azure-identity and azure-mgmt-containerinstance."
-        }
-
-    sub_id = settings.AZURE_SUBSCRIPTION_ID
-    resource_group = settings.AZURE_ACI_RESOURCE_GROUP
-    location = getattr(settings, "AZURE_ACI_LOCATION", "eastus")
-    acr_server = getattr(settings, "AZURE_ACR_SERVER", "")
-    acr_user = getattr(settings, "AZURE_ACR_USERNAME", None)
-    acr_pass = getattr(settings, "AZURE_ACR_PASSWORD", None)
-
-    # For Azure, the image should be pulled from ACR (or a public registry if acr_server is empty)
-    img = f"{acr_server}/{config['image']}:latest" if acr_server else f"{config['image']}:latest"
-
-    # We use a trick to encode the code/input and decode it inside the container using shell
-    src_b64 = base64.b64encode(source_code.encode("utf-8")).decode("utf-8")
-    std_b64 = base64.b64encode((stdin_input or "").encode("utf-8")).decode("utf-8")
-    
-    filename = config["filename"]
-    
-    # Constructing a single bash command to write code, compile (if needed), and run logic
-    cmds = [
-        "mkdir -p /code",
-        f"printf '%s' '{src_b64}' | base64 -d > /code/{filename}"
-    ]
-    if config["compile_cmd"]:
-        comp_str = " ".join(config["compile_cmd"])
-        # Append logic to only run if compilation succeeds
-        cmds.append(f"{comp_str}")
-        
-    run_str = " ".join(config["run_cmd"])
-    # 5 second timeout required
-    cmds.append(f"printf '%s' '{std_b64}' | base64 -d | timeout 5 {run_str}")
-    
-    full_cmd = " && ".join(cmds)
-    
-    wrapped_cmd = f"{{ {full_cmd} ; }} 2>&1 ; echo \"__EXIT_CODE__$?\" ; sleep 0.2"
-    b64_cmd = base64.b64encode(wrapped_cmd.encode("utf-8")).decode("utf-8")
-    # Simplified ACI command logic
-    
-    if not interview_id:
-        return {
-            "stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
-            "error": "Strict session container model enforced: interview_id is required."
-        }
-
-    cg_name = f"code-runner-{interview_id}"
-    container_name = "runner"
-    try:
-        credential = DefaultAzureCredential()
-        client = ContainerInstanceManagementClient(credential, sub_id)
-        
-        cg = client.container_groups.get(resource_group, cg_name)
-        if cg.instance_view and cg.instance_view.state != "Running":
-            return {
-                "stdout": "", "stderr": "", "exit_code": -1, "timed_out": False,
-                "error": "Coding container not initialized. Start coding section first."
-            }
-        
-        from azure.mgmt.containerinstance.models import ContainerExecRequest, ContainerExecRequestTerminalSize
-        import websockets.sync.client
-        from websockets.exceptions import ConnectionClosed
-        import re
-        
-        # Use DOUBLE QUOTES for the -c argument because ACI's command parser 
-        # often splits incorrectly if single quotes are used as the primary grouping character.
-        exec_command_str = f'/bin/sh -c "echo {b64_cmd} | base64 -d | sh"'
-        
-        exec_req = ContainerExecRequest(
-            command=exec_command_str,
-            terminal_size=ContainerExecRequestTerminalSize(rows=24, cols=80)
-        )
-        
-        logger.info(f"✔ container reused: {cg_name} for execution.")
-        logger.info(f"Executing code inside container {cg_name} via ACI Exec")
-        resp = client.containers.execute_command(
-            resource_group,
-            cg_name,
-            container_name,
-            exec_req
-        )
-        
-        logs = ""
-        try:
-            with websockets.sync.client.connect(resp.web_socket_uri) as ws:
-                ws.send(resp.password)
-                while True:
-                    try:
-                        msg = ws.recv(timeout=10)
-                        if isinstance(msg, bytes):
-                            msg = msg.decode("utf-8")
-                        logs += msg
-                    except TimeoutError:
-                        continue
-                    except ConnectionClosed:
-                        break
-                    except Exception:
-                        break
-        except Exception as wse:
-            logger.error(f"Websocket error: {wse}")
-        
-        exit_code = -1
-        timed_out = False
-        
-        logger.debug(f"RAW LOGS from ACI: {repr(logs)}")
-        
-        # Parse output for our custom exit code marker
-        match = re.search(r"__EXIT_CODE__(\d+)", logs)
-        if match:
-            exit_code = int(match.group(1))
-            logs = logs[:match.start()].strip()
-            # If we see the marker, we know the command finished.
-            # If the marker says 0, it's stdout. If not, it's stderr.
-        else:
-            # Marker missing: likely a timeout or a crash of the wrapper shell
-            if "Terminated" in logs or "timeout" in logs or not logs:
-                timed_out = True
-            
-        logger.info(f"✔ code executed in container {cg_name} (exit_code: {exit_code}, timed_out: {timed_out})")
-        
-        # Normalize result
-        # If we have an exit_code 137, that's almost always an OOM or a hard timeout
-        if exit_code == 137:
-            timed_out = True
-            
-        # Ensure 'error' contains the actual syntax error / shell logs so the UI shows it.
-        error_msg = None
-        if timed_out:
-            error_msg = "Execution timed out or container was terminated."
-        elif exit_code != 0:
-            error_msg = logs if logs else "Execution failed with non-zero exit code."
-
-        return {
-            "stdout": logs if exit_code == 0 else "",
-            "stderr": logs if exit_code != 0 else "", # Show logs if exited with error OR if marker missing (-1)
-            "exit_code": exit_code,
-            "timed_out": timed_out,
-            "error": error_msg,
-        }
-    except Exception as e:
-        logger.exception("Azure Exec on Running Container Error")
-=======
 async def execute_code(
     language: str,
     source_code: str,
@@ -456,7 +133,6 @@ async def execute_code(
     
     if not piston_lang:
         supported = ", ".join(sorted(set(LANGUAGE_MAPPING.keys())))
->>>>>>> 1153a7b (uising piston)
         return {
             "stdout": "",
             "stderr": "",
@@ -464,93 +140,6 @@ async def execute_code(
             "timed_out": False,
             "error": str(e),
         }
-<<<<<<< HEAD
-
-# ---------------------------------------------------------------------------
-# Local Execution
-# ---------------------------------------------------------------------------
-async def _execute_code_local(
-    config: dict,
-    source_code: str,
-    stdin_input: Optional[str] = None,
-) -> dict:
-    image = config["image"]
-    filename = config["filename"]
-    compile_cmd = config["compile_cmd"]
-    run_cmd = config["run_cmd"]
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        source_path = os.path.join(tmp_dir, filename)
-        try:
-            with open(source_path, "w", encoding="utf-8") as fh:
-                fh.write(source_code)
-        except OSError as exc:
-            return {
-                "stdout": "",
-                "stderr": "",
-                "exit_code": -1,
-                "timed_out": False,
-                "error": f"Failed to write source file: {exc}",
-            }
-
-        if compile_cmd:
-            compile_docker_cmd = _docker_compile_cmd(image, tmp_dir, compile_cmd)
-            compile_result = await _run_subprocess(compile_docker_cmd, timeout=TIMEOUT_SECONDS)
-
-            if compile_result["timed_out"] or compile_result["exit_code"] != 0:
-                return {
-                    "stdout": compile_result["stdout"],
-                    "stderr": compile_result["stderr"] or compile_result["error"],
-                    "exit_code": compile_result["exit_code"],
-                    "timed_out": compile_result["timed_out"],
-                    "error": "Compilation failed.",
-                }
-
-        run_docker_cmd = _docker_run_cmd(image, tmp_dir, run_cmd)
-        return await _run_subprocess(run_docker_cmd, stdin_data=stdin_input, timeout=TIMEOUT_SECONDS)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def _execute_wrapper(*args, **kwargs):
-    return _execute_code_azure(*args, **kwargs)
-
-async def execute_code(
-    language: str,
-    source_code: str,
-    stdin_input: Optional[str] = None,
-    interview_id: Optional[str] = None,
-) -> dict:
-    lang = language.lower().strip()
-    if lang not in LANGUAGE_CONFIG:
-        supported = ", ".join(LANGUAGE_CONFIG.keys())
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": False,
-            "error": f"Unsupported language '{language}'. Supported: {supported}",
-        }
-
-    config = LANGUAGE_CONFIG[lang]
-
-    # Check if Azure Container Instances applies
-    if is_azure_aci_configured():
-        import asyncio
-        return await asyncio.to_thread(_execute_wrapper, config, source_code, stdin_input, interview_id)
-    else:
-        return await _execute_code_local(config, source_code, stdin_input)
-
-
-async def run_test_cases(
-    language: str,
-    source_code: str,
-    test_cases: list[dict],
-    interview_id: Optional[str] = None,
-) -> list[dict]:
-=======
     
     version = LANGUAGE_VERSIONS.get(piston_lang, "*")
     file_extension = _get_file_extension(piston_lang)
@@ -663,32 +252,20 @@ async def run_test_cases(
         ...
     ]
     """
->>>>>>> 1153a7b (uising piston)
     results = []
     
     for tc in test_cases:
         tc_id = tc.get("id")
         stdin_input: str = tc.get("input", "")
         expected_output: str = tc.get("expected_output", "")
-<<<<<<< HEAD
-
-=======
         
         # Execute the code for this test case
->>>>>>> 1153a7b (uising piston)
         exec_result = await execute_code(
             language=language,
             source_code=source_code,
             stdin_input=stdin_input,
             interview_id=interview_id,
         )
-<<<<<<< HEAD
-
-        actual_output: str = exec_result["stdout"]
-        actual_stripped = actual_output.strip()
-        expected_stripped = expected_output.strip()
-
-=======
         
         # Normalize output for comparison
         actual_output: str = exec_result["stdout"]
@@ -696,17 +273,12 @@ async def run_test_cases(
         expected_stripped = expected_output.strip()
         
         # Determine pass/fail
->>>>>>> 1153a7b (uising piston)
         execution_error = exec_result.get("error")
         timed_out = exec_result.get("timed_out", False)
         
         if timed_out:
             passed = False
-<<<<<<< HEAD
-            error_msg = exec_result["error"]
-=======
             error_msg = exec_result["error"] or "Execution timed out"
->>>>>>> 1153a7b (uising piston)
         elif execution_error:
             passed = False
             error_msg = execution_error
