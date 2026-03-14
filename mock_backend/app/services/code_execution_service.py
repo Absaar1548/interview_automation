@@ -248,9 +248,9 @@ def _execute_code_azure(
     
     full_cmd = " && ".join(cmds)
     
-    wrapped_cmd = f"{{ {full_cmd} ; }} ; echo \"__EXIT_CODE__$?\""
+    wrapped_cmd = f"{{ {full_cmd} ; }} 2>&1 ; echo \"__EXIT_CODE__$?\" ; sleep 0.2"
     b64_cmd = base64.b64encode(wrapped_cmd.encode("utf-8")).decode("utf-8")
-    final_entrypoint = f"/bin/sh -c 'printf \"%s\" \"{b64_cmd}\" | base64 -d | sh'"
+    # Simplified ACI command logic
     
     if not interview_id:
         return {
@@ -276,16 +276,12 @@ def _execute_code_azure(
         from websockets.exceptions import ConnectionClosed
         import re
         
-        # ACI execute_command often fails with nested quotes in a single string.
-        # Passing a list of arguments is the standard way to avoid shell splitting issues.
-        exec_command = [
-            "/bin/sh",
-            "-c",
-            f"printf '%s' '{b64_cmd}' | base64 -d | sh"
-        ]
+        # Use DOUBLE QUOTES for the -c argument because ACI's command parser 
+        # often splits incorrectly if single quotes are used as the primary grouping character.
+        exec_command_str = f'/bin/sh -c "echo {b64_cmd} | base64 -d | sh"'
         
         exec_req = ContainerExecRequest(
-            command=exec_command,
+            command=exec_command_str,
             terminal_size=ContainerExecRequestTerminalSize(rows=24, cols=80)
         )
         
@@ -320,6 +316,8 @@ def _execute_code_azure(
         exit_code = -1
         timed_out = False
         
+        logger.debug(f"RAW LOGS from ACI: {repr(logs)}")
+        
         # Parse output for our custom exit code marker
         match = re.search(r"__EXIT_CODE__(\d+)", logs)
         if match:
@@ -339,12 +337,19 @@ def _execute_code_azure(
         if exit_code == 137:
             timed_out = True
             
+        # Ensure 'error' contains the actual syntax error / shell logs so the UI shows it.
+        error_msg = None
+        if timed_out:
+            error_msg = "Execution timed out or container was terminated."
+        elif exit_code != 0:
+            error_msg = logs if logs else "Execution failed with non-zero exit code."
+
         return {
             "stdout": logs if exit_code == 0 else "",
-            "stderr": logs if exit_code != 0 and exit_code != -1 else "",
+            "stderr": logs if exit_code != 0 else "", # Show logs if exited with error OR if marker missing (-1)
             "exit_code": exit_code,
             "timed_out": timed_out,
-            "error": "Execution timed out or container was terminated." if timed_out else (None if exit_code == 0 else "Execution failed with non-zero exit code."),
+            "error": error_msg,
         }
     except Exception as e:
         logger.exception("Azure Exec on Running Container Error")
