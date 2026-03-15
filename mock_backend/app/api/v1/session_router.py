@@ -23,7 +23,7 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_router import get_current_active_user
@@ -390,6 +390,7 @@ class StartSectionRequest(BaseModel):
 @router.post("/candidate/interview/start-section")
 async def start_section(
     payload: StartSectionRequest,
+    background_tasks: BackgroundTasks,
     x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
     current_user: User = Depends(_get_current_candidate),
     session: AsyncSession = Depends(get_db_session),
@@ -402,15 +403,29 @@ async def start_section(
 
     if payload.section_id:
         section_id_uuid = validate_uuid(payload.section_id)
+        section_type_to_start = payload.section_type
+        if not section_type_to_start:
+            sections = await InterviewSessionSQLService.get_sections(session, session_id, current_user.id)
+            for s in sections:
+                if str(s["id"]) == payload.section_id:
+                    section_type_to_start = s["section_type"]
+                    break
     elif payload.section_type:
         sections = await InterviewSessionSQLService.get_sections(session, session_id, current_user.id)
         section = next((s for s in sections if s["section_type"] == payload.section_type), None)
         if not section:
             raise HTTPException(status_code=404, detail="Section type not found")
         section_id_uuid = validate_uuid(section["id"])
+        section_type_to_start = payload.section_type
     else:
         raise HTTPException(status_code=400, detail="Must provide section_id or section_type")
     
+    if section_type_to_start.lower() == "coding":
+        from app.services.code_container_session_service import CodeContainerSessionService
+        logger.info(f"Triggering background creation of coding session container for interview {session_id}")
+        background_tasks.add_task(CodeContainerSessionService.create_session_container, str(session_id))
+    
+    logger.info(f"Starting interview section of type: {section_type_to_start}")
     return await InterviewSessionSQLService.start_section(session, session_id, section_id_uuid, current_user.id)
 
 
@@ -480,6 +495,24 @@ async def complete_section(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
     
     session_id = validate_uuid(x_interview_id)
+
+    sections = await InterviewSessionSQLService.get_sections(session, session_id, current_user.id)
+    active_section = next((s for s in sections if s.get("status") == "in_progress" or s.get("is_current")), None)
+    
+    if active_section and active_section.get("section_type") == "CODING":
+        container_name = f"code-runner-{session_id}"
+        logger.info(f"Deleting coding container {container_name}")
+        try:
+            from app.services.code_container_session_service import CodeContainerSessionService
+            import asyncio
+            # Run synchronous delete_session_container in a background thread to avoid blocking Event Loop
+            await asyncio.to_thread(
+                CodeContainerSessionService.delete_session_container,
+                str(session_id)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to delete session container: {e}")
+
     return await InterviewSessionSQLService.complete_current_section(session, session_id, current_user.id)
 
 
@@ -499,5 +532,18 @@ async def complete_interview(
     session_id = validate_uuid(x_interview_id)
     result = await InterviewSessionSQLService.complete_session(session, session_id, current_user.id)
     
+    container_name = f"code-runner-{session_id}"
+    logger.info(f"Deleting coding container {container_name}")
+    try:
+        from app.services.code_container_session_service import CodeContainerSessionService
+        import asyncio
+        # Run synchronous delete_session_container in a background thread to avoid blocking Event Loop
+        await asyncio.to_thread(
+            CodeContainerSessionService.delete_session_container,
+            str(session_id)
+        )
+    except Exception as e:
+        logger.warning(f"Failed to delete session container: {e}")
+        
     logger.info(f"[complete_interview] Session {session_id} completed by candidate {current_user.id}")
     return result

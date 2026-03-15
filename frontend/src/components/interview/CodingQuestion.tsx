@@ -92,7 +92,7 @@ export default function CodingQuestion({ question, interviewId }: CodingQuestion
     }
 
     const handleRun = () => {
-        runCurrentCode()
+        runCurrentCode(interviewId || undefined)
     }
 
     const handleSubmit = () => {

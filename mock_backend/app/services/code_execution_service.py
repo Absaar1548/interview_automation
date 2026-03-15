@@ -1,175 +1,122 @@
 """
 Code Execution Service
 ----------------------
-Runs candidate source code inside isolated Docker containers.
+Runs candidate source code using Piston API (free public endpoint).
 
-Security model:
-  - Network disabled (--network none)
-  - Memory capped at 256 MB
-  - CPU capped at 1 core
-  - PID limit of 50
-  - Container removed after execution (--rm)
-  - Hard timeout of 10 seconds per run
+Uses the public Piston API at https://emkc.org/api/v2/piston/execute
+for secure, isolated code execution without requiring Docker or local infrastructure.
 """
 
 import os
-import subprocess
-import tempfile
 import logging
-from typing import Optional
+import httpx
+from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+try:
+    from azure.identity import DefaultAzureCredential
+    from azure.mgmt.containerinstance import ContainerInstanceManagementClient
+    from azure.mgmt.containerinstance.models import (
+        ContainerGroup,
+        Container,
+        ContainerPort,
+        EnvironmentVariable,
+        ResourceRequests,
+        ResourceRequirements,
+        OperatingSystemTypes,
+        ImageRegistryCredential,
+    )
+    AZURE_SDK_AVAILABLE = True
+except ImportError:
+    AZURE_SDK_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
-# Security limits
+# Configuration
 # ---------------------------------------------------------------------------
 TIMEOUT_SECONDS = 10
-MEMORY_LIMIT = "256m"
 
-# ---------------------------------------------------------------------------
-# Per-language configuration
-# ---------------------------------------------------------------------------
-# Each entry defines:
-#   image       – Docker image to use (must be pre-built on the host)
-#   filename    – name given to the source file inside /code/
-#   compile_cmd – shell tokens run before the program (None = interpreted)
-#   run_cmd     – shell tokens used to execute the program
-# ---------------------------------------------------------------------------
-LANGUAGE_CONFIG: dict[str, dict] = {
-    "python3": {
-        "image": "code-runner-python",
-        "filename": "solution.py",
-        "compile_cmd": None,
-        "run_cmd": ["python3", "/code/solution.py"],
-    },
-    "javascript": {
-        "image": "code-runner-node",
-        "filename": "solution.js",
-        "compile_cmd": None,
-        "run_cmd": ["node", "/code/solution.js"],
-    },
-    "java": {
-        "image": "code-runner-java",
-        "filename": "Solution.java",
-        "compile_cmd": ["javac", "/code/Solution.java"],
-        "run_cmd": ["java", "-cp", "/code", "Solution"],
-    },
-    "cpp": {
-        "image": "code-runner-cpp",
-        "filename": "solution.cpp",
-        "compile_cmd": ["g++", "-O2", "-o", "/code/solution", "/code/solution.cpp"],
-        "run_cmd": ["/code/solution"],
-    },
+# Piston API Configuration
+PISTON_API_URL = os.getenv(
+    "PISTON_API_URL",
+    "https://emkc.org/api/v2/piston/execute"  # Free public API endpoint
+)
+
+# Language mapping: your language names -> Piston language names
+LANGUAGE_MAPPING = {
+    "python3": "python",
+    "python": "python",
+    "javascript": "javascript",
+    "js": "javascript",
+    "java": "java",
+    "cpp": "cpp",
+    "c++": "cpp",
+    "c": "c",
+    "csharp": "csharp",
+    "c#": "csharp",
+    "go": "go",
+    "rust": "rust",
+    "ruby": "ruby",
+    "php": "php",
+    "typescript": "typescript",
+    "ts": "typescript",
 }
 
-# ---------------------------------------------------------------------------
-# Base Docker flags applied to every container run
-# ---------------------------------------------------------------------------
-_DOCKER_BASE_FLAGS = [
-    "--rm",
-    "-i",
-    "--network", "none",
-    f"--memory={MEMORY_LIMIT}",
-    "--cpus=1",
-    "--pids-limit=50",
-]
+# Piston version mapping (using "*" for latest stable version)
+# Piston API will use the latest available version when "*" is specified
+LANGUAGE_VERSIONS = {
+    "python": "*",
+    "javascript": "*",
+    "java": "*",
+    "cpp": "*",
+    "c": "*",
+    "csharp": "*",
+    "go": "*",
+    "rust": "*",
+    "ruby": "*",
+    "php": "*",
+    "typescript": "*",
+}
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _run_subprocess(
-    cmd: list[str],
-    stdin_data: Optional[str] = None,
-    timeout: int = TIMEOUT_SECONDS,
-) -> dict:
-    """
-    Execute *cmd* as a subprocess and return a normalised result dict.
-
-    Returns:
-        {stdout, stderr, exit_code, timed_out, error}
-    """
-    try:
-        result = subprocess.run(
-            cmd,
-            input=stdin_data,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
-            "timed_out": False,
-            "error": None,
-        }
-    except subprocess.TimeoutExpired:
-        logger.warning("Subprocess timed out: %s", cmd)
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": True,
-            "error": f"Execution timed out after {timeout} seconds.",
-        }
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Unexpected error running subprocess: %s", exc)
-        return {
-            "stdout": "",
-            "stderr": "",
-            "exit_code": -1,
-            "timed_out": False,
-            "error": str(exc),
-        }
+def _get_file_extension(language: str) -> str:
+    """Get file extension for a language."""
+    extensions = {
+        "python": "py",
+        "javascript": "js",
+        "java": "java",
+        "cpp": "cpp",
+        "c": "c",
+        "csharp": "cs",
+        "go": "go",
+        "rust": "rs",
+        "ruby": "rb",
+        "php": "php",
+        "typescript": "ts",
+    }
+    return extensions.get(language, "txt")
 
 
-def _docker_run_cmd(image: str, mount_dir: str, run_cmd: list[str]) -> list[str]:
-    """Build the full ``docker run`` command list."""
-    return [
-        "docker", "run",
-        *_DOCKER_BASE_FLAGS,
-        "-v", f"{mount_dir}:/code:ro",  # mount source dir as read-only
-        image,
-        *run_cmd,
-    ]
+def is_azure_aci_configured() -> bool:
+    """Check if Azure Container Instances configuration is present."""
+    is_enabled = str(getattr(settings, "USE_AZURE_ACI", "false")).lower() == "true"
+    has_config = bool(getattr(settings, "AZURE_SUBSCRIPTION_ID", None) and getattr(settings, "AZURE_ACI_RESOURCE_GROUP", None))
+    return is_enabled and has_config
 
-
-def _docker_compile_cmd(image: str, mount_dir: str, compile_cmd: list[str]) -> list[str]:
-    """
-    Build a ``docker run`` command for compilation.
-    The volume is mounted read-write so the compiler can emit output artefacts.
-    """
-    return [
-        "docker", "run",
-        *_DOCKER_BASE_FLAGS,
-        "-v", f"{mount_dir}:/code",  # read-write for compiler output
-        image,
-        *compile_cmd,
-    ]
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def execute_code(
+async def execute_code(
     language: str,
     source_code: str,
     stdin_input: Optional[str] = None,
-) -> dict:
+) -> Dict[str, Any]:
     """
-    Execute *source_code* written in *language* inside a Docker sandbox.
-
-    Steps
-    -----
-    1. Validate the requested language.
-    2. Write the source file to a temporary directory.
-    3. If the language requires compilation, compile first.
-    4. Run the program, piping *stdin_input* if provided.
-    5. Return a result dict with stdout / stderr / exit_code / timed_out / error.
-
+    Execute code using Piston API.
+    
+    Parameters
+    ----------
+    language    : Programming language (e.g., "python3", "javascript", "java", "cpp")
+    source_code : The source code to execute
+    stdin_input : Optional stdin input for the program
+    
     Returns
     -------
     {
@@ -180,78 +127,116 @@ def execute_code(
         "error"    : str | None,
     }
     """
-    # --- validate language -------------------------------------------------
+    # Map language name to Piston format
     lang = language.lower().strip()
-    if lang not in LANGUAGE_CONFIG:
-        supported = ", ".join(LANGUAGE_CONFIG.keys())
+    piston_lang = LANGUAGE_MAPPING.get(lang)
+    
+    if not piston_lang:
+        supported = ", ".join(sorted(set(LANGUAGE_MAPPING.keys())))
         return {
             "stdout": "",
             "stderr": "",
             "exit_code": -1,
             "timed_out": False,
-            "error": f"Unsupported language '{language}'. Supported: {supported}",
+            "error": str(e),
+        }
+    
+    version = LANGUAGE_VERSIONS.get(piston_lang, "*")
+    file_extension = _get_file_extension(piston_lang)
+    
+    # Prepare Piston API request payload
+    payload = {
+        "language": piston_lang,
+        "version": version,
+        "files": [
+            {
+                "name": f"main.{file_extension}",
+                "content": source_code,
+            }
+        ],
+        "stdin": stdin_input or "",
+        "run_timeout": TIMEOUT_SECONDS * 1000,  # Piston uses milliseconds
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(PISTON_API_URL, json=payload)
+            response.raise_for_status()
+            result = response.json()
+            
+            # Piston API response structure
+            run_result = result.get("run", {})
+            
+            # Extract output and error information
+            stdout = run_result.get("output", "")
+            stderr = run_result.get("stderr", "")
+            exit_code = run_result.get("code", 0)
+            
+            # Check if execution timed out (Piston returns signal "SIGKILL" on timeout)
+            signal = run_result.get("signal")
+            timed_out = signal == "SIGKILL" or signal == "SIGTERM"
+            
+            # Determine if there was an error
+            error = None
+            if timed_out:
+                error = f"Execution timed out after {TIMEOUT_SECONDS} seconds."
+            elif exit_code != 0:
+                error = stderr if stderr else f"Program exited with code {exit_code}"
+            
+            return {
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+                "timed_out": timed_out,
+                "error": error,
+            }
+            
+    except httpx.TimeoutException:
+        logger.warning(f"Piston API request timed out for language: {language}")
+        return {
+            "stdout": "",
+            "stderr": "",
+            "exit_code": -1,
+            "timed_out": True,
+            "error": f"Request to Piston API timed out after 15 seconds.",
+        }
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Piston API HTTP error: {e.response.status_code} - {e.response.text}")
+        return {
+            "stdout": "",
+            "stderr": "",
+            "exit_code": -1,
+            "timed_out": False,
+            "error": f"Piston API error: HTTP {e.response.status_code}",
+        }
+    except Exception as exc:
+        logger.exception(f"Unexpected error calling Piston API: {exc}")
+        return {
+            "stdout": "",
+            "stderr": "",
+            "exit_code": -1,
+            "timed_out": False,
+            "error": f"Unexpected error: {str(exc)}",
         }
 
-    config = LANGUAGE_CONFIG[lang]
-    image = config["image"]
-    filename = config["filename"]
-    compile_cmd = config["compile_cmd"]
-    run_cmd = config["run_cmd"]
 
-    # --- write source to temp dir -----------------------------------------
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        source_path = os.path.join(tmp_dir, filename)
-        try:
-            with open(source_path, "w", encoding="utf-8") as fh:
-                fh.write(source_code)
-        except OSError as exc:
-            return {
-                "stdout": "",
-                "stderr": "",
-                "exit_code": -1,
-                "timed_out": False,
-                "error": f"Failed to write source file: {exc}",
-            }
-
-        # --- compile (if required) ----------------------------------------
-        if compile_cmd:
-            compile_docker_cmd = _docker_compile_cmd(image, tmp_dir, compile_cmd)
-            compile_result = _run_subprocess(compile_docker_cmd, timeout=TIMEOUT_SECONDS)
-
-            if compile_result["timed_out"] or compile_result["exit_code"] != 0:
-                # Surface compilation errors directly to the caller
-                return {
-                    "stdout": compile_result["stdout"],
-                    "stderr": compile_result["stderr"] or compile_result["error"],
-                    "exit_code": compile_result["exit_code"],
-                    "timed_out": compile_result["timed_out"],
-                    "error": "Compilation failed.",
-                }
-
-        # --- run -------------------------------------------------------------
-        run_docker_cmd = _docker_run_cmd(image, tmp_dir, run_cmd)
-        return _run_subprocess(run_docker_cmd, stdin_data=stdin_input, timeout=TIMEOUT_SECONDS)
-
-        # tempfile.TemporaryDirectory context manager cleans up tmp_dir here
-
-
-def run_test_cases(
+async def run_test_cases(
     language: str,
     source_code: str,
-    test_cases: list[dict],
-) -> list[dict]:
+    test_cases: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     """
-    Run *source_code* against a list of test cases and return pass/fail results.
-
+    Run code against multiple test cases using Piston API.
+    
     Parameters
     ----------
-    language    : one of the keys in LANGUAGE_CONFIG
-    source_code : the candidate's solution
-    test_cases  : list of dicts, each with keys:
+    language    : Programming language (e.g., "python3", "javascript", "java", "cpp")
+    source_code : The candidate's solution
+    test_cases  : List of dicts, each with keys:
                     - id              (str | UUID)
                     - input           (str)
                     - expected_output (str)
-
+    
     Returns
     -------
     List of result dicts:
@@ -268,31 +253,32 @@ def run_test_cases(
     ]
     """
     results = []
-
+    
     for tc in test_cases:
         tc_id = tc.get("id")
         stdin_input: str = tc.get("input", "")
         expected_output: str = tc.get("expected_output", "")
-
+        
         # Execute the code for this test case
-        exec_result = execute_code(
+        exec_result = await execute_code(
             language=language,
             source_code=source_code,
             stdin_input=stdin_input,
+            interview_id=interview_id,
         )
-
-        # Normalise actual output: strip trailing whitespace for comparison
+        
+        # Normalize output for comparison
         actual_output: str = exec_result["stdout"]
         actual_stripped = actual_output.strip()
         expected_stripped = expected_output.strip()
-
+        
         # Determine pass/fail
         execution_error = exec_result.get("error")
         timed_out = exec_result.get("timed_out", False)
-
+        
         if timed_out:
             passed = False
-            error_msg = exec_result["error"]  # timeout message
+            error_msg = exec_result["error"] or "Execution timed out"
         elif execution_error:
             passed = False
             error_msg = execution_error
@@ -302,7 +288,7 @@ def run_test_cases(
         else:
             passed = actual_stripped == expected_stripped
             error_msg = None
-
+        
         results.append({
             "test_case_id": tc_id,
             "input": stdin_input,
@@ -311,5 +297,6 @@ def run_test_cases(
             "passed": passed,
             "error": error_msg,
         })
-
+    
     return results
+

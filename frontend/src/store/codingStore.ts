@@ -26,7 +26,7 @@ interface CodingState {
     setProblemFromInterview: (question: any) => void
     setLanguage: (lang: string) => void
     setCode: (code: string) => void
-    runCurrentCode: () => Promise<void>
+    runCurrentCode: (interviewId?: string) => Promise<void>
     submitCurrentCode: (interviewId?: string, candidateId?: string) => Promise<void>
 }
 
@@ -81,7 +81,7 @@ export const useCodingStore = create<CodingState>((set, get) => ({
 
     setCode: (code: string) => set({ code }),
 
-    runCurrentCode: async () => {
+    runCurrentCode: async (interviewId?: string) => {
         const { problem, language, code, isRunning, isSubmitting } = get()
         if (!problem || isRunning || isSubmitting) return
 
@@ -91,7 +91,8 @@ export const useCodingStore = create<CodingState>((set, get) => ({
                 problem_id: problem.id,
                 session_question_id: problem.session_question_id,
                 language,
-                source_code: code
+                source_code: code,
+                interview_id: interviewId
             })
             set({
                 results: response.results,

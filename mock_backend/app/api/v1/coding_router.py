@@ -51,7 +51,7 @@ class CodeRunRequest(BaseModel):
     problem_id: str
     language: str
     source_code: str
-    interview_id: Optional[str] = None
+    interview_id: str
     candidate_id: Optional[str] = None
     session_question_id: Optional[str] = None
 
@@ -230,11 +230,34 @@ async def run_code(
         for tc in visible_tcs
     ]
 
-    # Execute (synchronous — wraps subprocess)
-    raw_results = run_test_cases(
+    from app.services.code_execution_service import get_container_state, is_azure_aci_configured
+    
+    if is_azure_aci_configured():
+        container_name = f"code-runner-{request.interview_id}"
+        state = await get_container_state(container_name)
+        
+        if state in ("Pending", "Creating"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Coding environment is still starting. Please wait a few seconds."
+            )
+        elif state in ("Failed", "Stopped"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Coding container failed to start."
+            )
+        elif state != "Running":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Coding container not initialized. Start coding section first."
+            )
+
+    # Execute (now async background run)
+    raw_results = await run_test_cases(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,
+        interview_id=request.interview_id,
     )
 
     results = [
@@ -340,11 +363,34 @@ async def submit_code(
         for tc in all_tcs
     ]
 
+    from app.services.code_execution_service import get_container_state, is_azure_aci_configured
+    
+    if is_azure_aci_configured():
+        container_name = f"code-runner-{request.interview_id}"
+        state = await get_container_state(container_name)
+        
+        if state in ("Pending", "Creating"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Coding environment is still starting. Please wait a few seconds."
+            )
+        elif state in ("Failed", "Stopped"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Coding container failed to start."
+            )
+        elif state != "Running":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Coding container not initialized. Start coding section first."
+            )
+
     # Execute against all test cases
-    raw_results = run_test_cases(
+    raw_results = await run_test_cases(
         language=request.language,
         source_code=request.source_code,
         test_cases=tc_dicts,
+        interview_id=request.interview_id,
     )
 
     results = [

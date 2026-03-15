@@ -360,12 +360,23 @@ class QuestionGeneratorService:
                 for item in coding_items:
                     if item.coding_problem:
                         p = item.coding_problem
+                        # Convert starter_code from dict to string
+                        starter_code_str = ""
+                        if p.starter_code:
+                            if isinstance(p.starter_code, dict):
+                                # If it's a dict with language keys, use python as default or first available
+                                starter_code_str = p.starter_code.get("python") or p.starter_code.get("javascript") or (list(p.starter_code.values())[0] if p.starter_code else "")
+                            elif isinstance(p.starter_code, str):
+                                starter_code_str = p.starter_code
+                            else:
+                                starter_code_str = str(p.starter_code)
+                        
                         coding_problems_formatted.append({
                             "problem_id": str(p.id),
                             "title": p.title,
                             "difficulty": p.difficulty,
                             "description": p.description,
-                            "starter_code": p.starter_code
+                            "starter_code": starter_code_str
                         })
             
             return {
@@ -1304,12 +1315,23 @@ Return ONLY the JSON object."""
                 
             p = random.choice(available)
             
+            # Convert starter_code from dict to string
+            starter_code_str = ""
+            if p.starter_code:
+                if isinstance(p.starter_code, dict):
+                    # If it's a dict with language keys, use python as default or first available
+                    starter_code_str = p.starter_code.get("python") or p.starter_code.get("javascript") or (list(p.starter_code.values())[0] if p.starter_code else "")
+                elif isinstance(p.starter_code, str):
+                    starter_code_str = p.starter_code
+                else:
+                    starter_code_str = str(p.starter_code)
+            
             return {
                 "problem_id": str(p.id),
                 "title": p.title,
                 "difficulty": p.difficulty,
                 "description": p.description,
-                "starter_code": p.starter_code
+                "starter_code": starter_code_str
             }
         except Exception as e:
             logger.error(f"Error getting single replacement coding problem from bank: {e}")
