@@ -332,8 +332,7 @@ async def admin_register_candidate(
         else:
             logger.warning(f"BackgroundTasks not available for candidate {new_user.id}")
         
-        # Print credentials to terminal for local dev visibility
-        print(f"\n[REGISTRATION] Registered {candidate_email} with password: {password}\n")
+        # Credentials are emailed via background task (see resume_tasks.py)
         
         return CandidateResponse(
             id=str(new_user.id),
