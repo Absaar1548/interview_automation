@@ -15,7 +15,7 @@ class AnswerWebSocket {
     private socket: Socket | null = null;
     private questionId: string | null = null;
     private _audioChunkCount: number = 0;
-    
+
     get ws(): Socket | null {
         return this.socket;
     }
@@ -34,11 +34,11 @@ class AnswerWebSocket {
         // Convert ws:// to http:// and wss:// to https:// for SocketIO
         const httpBase = wsBase.replace(/^ws/, 'http').replace(/^wss/, 'https');
         const socketUrl = `${httpBase}/answer/ws`;
-        
+
         console.log(`[AnswerWebSocket] Connecting to: ${socketUrl}`);
-        
+
         this.socket = io(socketUrl, {
-            transports: ['websocket', 'polling'], // Enable polling fallback
+            transports: ['polling', 'websocket'], // Enable polling fallback
             reconnection: false, // Don't auto-reconnect for answer sessions
         });
 
@@ -94,7 +94,7 @@ class AnswerWebSocket {
                 // Convert ArrayBuffer to base64 for SocketIO
                 const base64 = this.arrayBufferToBase64(data);
                 this.socket.emit('audio_data', { data: base64 });
-                
+
                 this._audioChunkCount++;
                 if (this._audioChunkCount % 10 === 0) {
                     console.log(`[AnswerWebSocket] Sent ${this._audioChunkCount} audio chunks`);
