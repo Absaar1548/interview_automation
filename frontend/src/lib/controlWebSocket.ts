@@ -31,12 +31,12 @@ class ControlWebSocket {
         // Convert ws:// to http:// and wss:// to https:// for SocketIO
         const httpBase = wsBase.replace(/^ws/, 'http').replace(/^wss/, 'https');
         const socketUrl = `${httpBase}/proctoring/ws`;
-        
+
         console.log(`[ControlWebSocket] Connecting to: ${socketUrl}`);
-        
+
         try {
             this.socket = io(socketUrl, {
-                transports: ['websocket', 'polling'], // Enable polling fallback
+                transports: ['polling', 'websocket'], // Enable polling fallback
                 reconnection: true,
                 reconnectionAttempts: 5,
                 reconnectionDelay: 1000,

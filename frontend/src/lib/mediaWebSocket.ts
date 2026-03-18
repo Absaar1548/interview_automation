@@ -39,7 +39,7 @@ class MediaWebSocket {
         const socketUrl = `${httpUrl}/proctoring/media/ws`;
 
         this.socket = io(socketUrl, {
-            transports: ['websocket', 'polling'], // Enable polling fallback
+            transports: ['polling', 'websocket'], // Enable polling fallback
             reconnection: !this.manualClose && this.reconnectAttempts < this.maxReconnectAttempts,
             reconnectionAttempts: this.maxReconnectAttempts,
             reconnectionDelay: 1000,
