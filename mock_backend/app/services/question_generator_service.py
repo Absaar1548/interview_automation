@@ -25,6 +25,20 @@ class QuestionGeneratorService:
     
     # Directory where resumes are stored
     RESUME_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "resumes")
+
+    @staticmethod
+    def _normalize_problem_solving_type(coding_config: Optional[Dict[str, Any]]) -> str:
+        cfg = coding_config or {}
+        raw = (
+            cfg.get("problem_solving_type")
+            or cfg.get("problem_type")
+            or cfg.get("type")
+            or "coding"
+        )
+        raw_s = str(raw).strip().lower()
+        if raw_s in ("analytical", "analytical_question", "analytical_questions", "non_coding", "non-coding"):
+            return "analytical"
+        return "coding"
     
     @staticmethod
     async def generate_curated_questions(
@@ -217,7 +231,7 @@ class QuestionGeneratorService:
                 logger.debug(f"🤖 Generating {num_technical_questions} technical questions using LLM...")
                 # Check if Azure OpenAI is available
                 from app.services.azure_openai_service import azure_openai_service
-                if not azure_openai_service.client:
+                if not azure_openai_service.async_client and not azure_openai_service.client:
                     logger.warning("Azure OpenAI client not initialized! Check configs in .env. Falling back to mock questions.")
                 else:
                     logger.debug("Azure OpenAI client is initialized and ready")
@@ -308,20 +322,46 @@ class QuestionGeneratorService:
                 logger.error("❌ CRITICAL: Still no questions after emergency fallback!")
                 raise ValueError("Failed to generate any questions. All fallback mechanisms failed.")
             
-            # Step 3: Fetch coding problems if configured
+            # Step 3: Build problem-solving section (coding or analytical)
+            problem_solving_type = "coding"
             coding_problems_formatted = []
+            analytical_questions_formatted = []
             if template and template.coding_config:
-                from app.services.template_engine import template_engine
-                coding_items = await template_engine._generate_coding_questions(template, session)
-                for item in coding_items:
-                    if item.coding_problem:
-                        p = item.coding_problem
-                        coding_problems_formatted.append({
-                            "problem_id": str(p.id),
-                            "title": p.title,
-                            "difficulty": p.difficulty,
-                            "description": p.description,
-                            "starter_code": p.starter_code
+                problem_solving_type = QuestionGeneratorService._normalize_problem_solving_type(template.coding_config)
+                if problem_solving_type == "coding":
+                    from app.services.template_engine import template_engine
+                    coding_items = await template_engine._generate_coding_questions(template, session)
+                    for item in coding_items:
+                        if item.coding_problem:
+                            p = item.coding_problem
+                            coding_problems_formatted.append({
+                                "problem_id": str(p.id),
+                                "title": p.title,
+                                "difficulty": p.difficulty,
+                                "description": p.description,
+                                "starter_code": p.starter_code
+                            })
+                else:
+                    count = int((template.coding_config or {}).get("count", 2) or 2)
+                    analytical_questions = await QuestionGeneratorService._generate_analytical_questions_with_llm(
+                        num_questions=max(1, count),
+                        role_name=role_name or "Business Analyst",
+                        resume_data=resume_data,
+                        jd_data=jd_data,
+                    )
+                    for i, q in enumerate(analytical_questions, 1):
+                        analytical_questions_formatted.append({
+                            "question_id": q.get("question_id"),
+                            "question_type": "static",
+                            "order": i,
+                            "prompt": q.get("prompt", ""),
+                            "difficulty": q.get("difficulty", "medium"),
+                            "time_limit_sec": q.get("time_limit_sec", 300),
+                            "answer_mode": "audio",
+                            "evaluation_mode": "audio",
+                            "source": q.get("source", "llm_generated"),
+                            "category": q.get("category", "ANALYTICAL"),
+                            "focus": q.get("focus", "non-technical problem solving")
                         })
             
             return {
@@ -333,7 +373,16 @@ class QuestionGeneratorService:
                 "generated_at": datetime.utcnow().isoformat() + "Z",
                 "generation_method": "question_bank_and_azure_openai_gpt4o",
                 "technical_section": {"questions": all_questions},
-                "coding_section": {"problems": coding_problems_formatted},
+                "coding_section": {
+                    "problem_solving_type": problem_solving_type,
+                    "problems": coding_problems_formatted,
+                    "questions": analytical_questions_formatted,
+                },
+                "problem_solving_section": {
+                    "problem_solving_type": problem_solving_type,
+                    "problems": coding_problems_formatted,
+                    "questions": analytical_questions_formatted,
+                },
                 "conversational_section": {"rounds": (template.conversational_config or {}).get("rounds", 0) if template else 0}
             }
         except Exception as e:
@@ -655,8 +704,8 @@ Return ONLY the JSON array, no additional text or markdown."""
             logger.debug(f"Sending async request to Azure OpenAI (Prompt length: {len(user_prompt)} characters)")
             
             start_time = datetime.now()
-            response = await asyncio.wait_for(
-                azure_openai_service.async_client.chat.completions.create(
+            response_text = await asyncio.wait_for(
+                azure_openai_service.chat_completion_json(
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -673,7 +722,6 @@ Return ONLY the JSON array, no additional text or markdown."""
             # Parse response - use threadpool for heavy JSON parsing
             import json
             import re
-            response_text = response.choices[0].message.content
             logger.debug(f"Received response from Azure OpenAI (Length: {len(response_text)} characters)")
             
             # Use threadpool for parsing if needed
@@ -832,13 +880,47 @@ Return ONLY the JSON array, no additional text or markdown."""
             projects = []
         experience = resume_data.get('experience', [])
         
-        # Build detailed project context
+        # Build detailed project context (latest 2-3 projects only)
         project_context = ""
+        selected_project_names: List[str] = []
+        selected_projects: List[Dict[str, Any]] = []
         if projects:
+            from datetime import datetime as _dt
+
+            def _project_sort_key(p: Dict[str, Any]):
+                if not isinstance(p, dict):
+                    return _dt.min
+                # Prefer explicit recency fields when available
+                for k in ("end_date", "to", "completed_at", "updated_at", "year", "date"):
+                    v = p.get(k)
+                    if not v:
+                        continue
+                    s = str(v).strip()
+                    # Handle current/ongoing projects as most recent
+                    if s.lower() in ("present", "current", "ongoing", "now"):
+                        return _dt.max
+                    # Try common date formats first
+                    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m", "%m/%Y", "%Y"):
+                        try:
+                            return _dt.strptime(s, fmt)
+                        except Exception:
+                            pass
+                # fallback: keep source order if no date exists
+                return _dt.min
+
+            # If dates are available, sort by recency; else rely on source ordering and take first 3
+            dated_projects = [p for p in projects if isinstance(p, dict) and any(p.get(k) for k in ("end_date", "to", "completed_at", "updated_at", "year", "date"))]
+            if dated_projects:
+                projects_for_context = sorted(projects, key=_project_sort_key, reverse=True)[:3]
+            else:
+                projects_for_context = projects[:3]
+            selected_projects = [p for p in projects_for_context if isinstance(p, dict)]
+
             project_context = "\n\nCANDIDATE PROJECTS (Focus on these for questions):\n"
-            for i, project in enumerate(projects[:5], 1):  # Top 5 projects
+            for i, project in enumerate(projects_for_context, 1):
                 if isinstance(project, dict):
                     project_name = project.get('name', f'Project {i}')
+                    selected_project_names.append(str(project_name).strip())
                     project_desc = project.get('description', '')
                     project_techs = project.get('technologies', [])
                     project_context += f"Project {i}: {project_name}\n"
@@ -846,6 +928,46 @@ Return ONLY the JSON array, no additional text or markdown."""
                     if project_techs:
                         project_context += f"  Technologies: {', '.join(project_techs[:10])}\n"
                     project_context += "\n"
+
+        # Per-project conversational flow:
+        # 1) Ask project overview first
+        # 2) Follow up using candidate's overview answer + resume/JD context
+        if selected_project_names:
+            prev_conv_prompts = [
+                str(q.get("prompt", q.get("question_text", ""))).lower()
+                for q in previous_questions
+                if str(q.get("question_type", "")).lower() == "conversational"
+            ]
+
+            def _project_is_already_opened(project_name: str) -> bool:
+                p = project_name.lower()
+                return any(p in pq for pq in prev_conv_prompts)
+
+            # Find first project that has not yet been opened in conversational round.
+            unopened_project_name = None
+            for pn in selected_project_names:
+                if pn and not _project_is_already_opened(pn):
+                    unopened_project_name = pn
+                    break
+
+            if unopened_project_name:
+                overview_q = (
+                    f"In your project '{unopened_project_name}', can you give a brief overview covering "
+                    "the project goal, your role, and the key outcome?"
+                )
+                return {
+                    "question_id": str(uuid.uuid4()),
+                    "question_type": "conversational",
+                    "order": len(previous_questions) + 1,
+                    "prompt": overview_q,
+                    "difficulty": "medium",
+                    "time_limit_sec": 240,
+                    "answer_mode": "audio",
+                    "evaluation_mode": "contextual",
+                    "source": "project_overview_seed",
+                    "focus": "project overview and ownership",
+                    "reasoning": "Start each project with an overview before deep follow-ups."
+                }
         
         resume_context = f"Skills: {', '.join(resume_skills[:10])}\n"
         if projects:
@@ -857,23 +979,46 @@ Return ONLY the JSON array, no additional text or markdown."""
         
         # Use Azure OpenAI to generate next question
         try:
-            if azure_openai_service.client:
-                system_prompt = """You are an expert technical interviewer conducting a live interview.
-Generate a conversational question based on the candidate's PROJECTS and previous answers.
-The question should:
-1. Focus on the candidate's PROJECTS - ask about specific projects they mentioned
-2. Drill deeper into technical implementation, challenges, and solutions
-3. Test technical depth and understanding
-4. Be relevant to the job requirements
-5. Be different from questions already asked
+            if azure_openai_service.async_client or azure_openai_service.client:
+                system_prompt = """You are an expert interviewer conducting a live, resume-driven conversation.
+Generate ONE conversational question grounded in the candidate's PROJECTS and prior answers.
 
-Return ONLY a valid JSON object with this structure:
+Question objectives:
+1) Explore the end-to-end FLOW of a project (context → goals → constraints → approach → stakeholders → risks → outcomes).
+2) Dive into decision rationale, trade-offs, execution timeline, ownership, and impact.
+3) Consider role transitions and cross-functional collaboration where applicable.
+4) Keep it open-ended and natural, no coding tasks.
+5) STRICTLY AVOID repetition: do not ask anything that is semantically similar to questions already asked (see AVOID_DUPLICATES).
+6) Ask ONLY ONE question at a time. Do not combine multiple sub-questions in one prompt.
+7) Keep each question focused to at most 3 concepts/aspects.
+8) Prefer ONLY the latest 2-3 projects from the provided list; do not focus on old projects unless no recent projects are available.
+9) The question MUST explicitly mention the project name it refers to (exact project name from context).
+
+Return ONLY a valid JSON object:
 {
-    "question": "The conversational question text focusing on candidate's projects",
-    "difficulty": "medium" or "hard",
-    "focus": "What this question tests",
-    "reasoning": "Why this question is relevant based on projects and previous answers"
+  "question": "conversational question text (no numbering)",
+  "difficulty": "medium" or "hard",
+  "focus": "capability being tested (e.g., project flow, decision-making, stakeholder management)",
+  "reasoning": "why this is relevant based on resume projects and the conversation so far"
 }"""
+
+                # Build duplication guard list
+                avoid_list = ""
+                if previous_questions:
+                    avoid_list = "\\n".join([f"- {q.get('prompt', q.get('question_text',''))}" for q in previous_questions if (q.get('prompt') or q.get('question_text'))])
+
+                # Choose project for follow-up: prefer latest project already opened in conversation.
+                active_project_name = selected_project_names[0] if selected_project_names else ""
+                for pn in reversed(selected_project_names):
+                    if pn and any(pn.lower() in pq for pq in prev_conv_prompts):
+                        active_project_name = pn
+                        break
+
+                # Latest answer context for better follow-up quality
+                latest_answer_text = ""
+                if previous_answers:
+                    latest_answer = previous_answers[-1]
+                    latest_answer_text = str(latest_answer.get("answer_text", latest_answer.get("answer", "")))[:900]
 
                 user_prompt = f"""Generate the next conversational interview question.
 
@@ -887,23 +1032,36 @@ JOB REQUIREMENTS:
 {conversation_context}
 
 INSTRUCTIONS:
-1. PRIORITY: Ask about the candidate's PROJECTS - focus on specific projects they mentioned
-2. For each project, ask about:
-   - Technical challenges faced
-   - Architecture and design decisions
-   - Technologies used and why
-   - Problems solved
-   - Scalability and performance considerations
-3. If projects were already discussed, ask deeper follow-up questions
-4. Difficulty should be medium or hard (conversational questions are typically harder)
-5. The question should feel natural and conversational
-6. Make it relevant to the job requirements
+1. PRIORITY: Focus on candidate PROJECTS and their end-to-end FLOW (goals, constraints, decisions, trade-offs, stakeholders, timelines, risks, metrics).
+2. Prefer deeper follow-ups exploring decisions and impact rather than surface-level technology lists.
+3. Difficulty should be medium or hard.
+4. Keep it conversational and open-ended.
+5. Make it relevant to the job requirements.
+6. ABSOLUTE: Do NOT repeat or closely paraphrase any question below. If similar, choose a distinct angle.
+7. Ask exactly ONE question sentence ending with a single question mark.
+8. Limit scope to max 3 concepts in that question.
+9. Ask from the most recent 2-3 projects shown in CANDIDATE PROJECTS.
+10. Explicitly include the project name in the question text.
+
+AVOID_DUPLICATES:
+{avoid_list or "- (none)"} 
+
+ACTIVE_PROJECT_FOR_THIS_TURN:
+{active_project_name}
+
+LATEST_CANDIDATE_OVERVIEW_OR_ANSWER_CONTEXT:
+{latest_answer_text or "No prior answer context available."}
+
+FLOW RULE (MANDATORY):
+- For each project, first ask overview once.
+- After overview is answered, ask follow-up questions for that SAME project using candidate's previous answer.
+- Do not jump to another project in follow-up unless current project has been sufficiently explored.
 
 Return ONLY the JSON object."""
 
                 start_time = datetime.now()
-                response = await asyncio.wait_for(
-                    azure_openai_service.async_client.chat.completions.create(
+                content = await asyncio.wait_for(
+                    azure_openai_service.chat_completion_json(
                         model="gpt-4o",
                         messages=[
                             {"role": "system", "content": system_prompt},
@@ -919,10 +1077,24 @@ Return ONLY the JSON object."""
                 logger.info(f"✅ Live conversational question generated in {duration:.2f}s")
                 
                 import json
-                llm_response = await run_in_threadpool(json.loads, response.choices[0].message.content)
+                llm_response = await run_in_threadpool(json.loads, content)
                 
                 # Format the question
                 question_text = llm_response.get('question', 'Tell me more about your experience.')
+                # Safety guard: if model returns multiple questions, keep only the first one.
+                if isinstance(question_text, str):
+                    q_marks = question_text.count("?")
+                    if q_marks > 1:
+                        first_q = question_text.split("?")[0].strip()
+                        question_text = f"{first_q}?"
+                    # Remove accidental line-break bullets that imply multiple asks.
+                    question_text = " ".join(question_text.splitlines()).strip()
+                    # Ensure the question explicitly references a project name when available.
+                    if selected_project_names:
+                        lower_q = question_text.lower()
+                        if not any(name.lower() in lower_q for name in selected_project_names if name):
+                            project_name = selected_project_names[0]
+                            question_text = f"In your project '{project_name}', {question_text[0].lower() + question_text[1:]}" if len(question_text) > 1 else f"In your project '{project_name}', can you explain your approach?"
                 difficulty = llm_response.get('difficulty', 'medium').lower()
                 if difficulty not in ['easy', 'medium', 'hard']:
                     difficulty = 'medium'
@@ -1099,7 +1271,7 @@ Return ONLY the JSON object."""
             
             logger.info(f"[QuestionGenerator] Regenerating single question with comment: {comment}")
             
-            if not azure_openai_service.client:
+            if not azure_openai_service.async_client and not azure_openai_service.client:
                 # Fallback to a mock question if no LLM
                 return {
                     **existing_question,
@@ -1187,6 +1359,224 @@ Return ONLY the JSON object."""
                 **existing_question,
                 "prompt": f"FALLBACK: {existing_question.get('prompt')} (Regeneration failed)",
                 "source": "regeneration_failed"
+            }
+
+    @staticmethod
+    async def _generate_analytical_questions_with_llm(
+        num_questions: int,
+        role_name: Optional[str] = None,
+        resume_data: Optional[Dict[str, Any]] = None,
+        jd_data: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate non-technical analytical questions (puzzles, guesstimates, business reasoning)
+        for roles like manager/business analyst.
+        """
+        try:
+            import uuid
+            import asyncio
+            import json
+            from fastapi.concurrency import run_in_threadpool
+
+            if not azure_openai_service.async_client and not azure_openai_service.client:
+                return QuestionGeneratorService._generate_mock_analytical_questions(num_questions, role_name)
+
+            role_text = role_name or "Business Analyst / Manager"
+            jd_focus = ""
+            if jd_data and isinstance(jd_data, dict):
+                reqs = jd_data.get("requirements", []) or []
+                jd_focus = "\n".join(reqs[:5]) if isinstance(reqs, list) else ""
+
+            system_prompt = """You are an expert interviewer for NON-TECHNICAL problem-solving roles.
+Generate analytical interview questions ONLY (no coding, no technical implementation details).
+
+Question styles should include:
+- Business case scenarios
+- Guesstimates / estimation questions
+- Logic puzzles and structured reasoning
+- Prioritization / decision-making scenarios
+- Process improvement and trade-off analysis
+
+Strict rules:
+- DO NOT ask programming, system design, architecture, or tool/framework questions.
+- Focus on thinking process, assumptions, structure, and communication.
+- Return ONLY a valid JSON array.
+
+JSON format:
+[
+  {
+    "question": "Question text",
+    "difficulty": "medium" or "hard",
+    "category": "ANALYTICAL",
+    "focus": "what capability this tests"
+  }
+]"""
+
+            user_prompt = f"""Generate {num_questions} non-technical analytical interview questions for role: {role_text}.
+
+Context (optional):
+{jd_focus if jd_focus else "General business / operations context"}
+
+Requirements:
+1. Include a mix of puzzle, guesstimate, and business case reasoning.
+2. Questions must assess structured thinking and problem-solving.
+3. Return exactly {num_questions} questions.
+4. Return JSON array only."""
+
+            response_text = await asyncio.wait_for(
+                azure_openai_service.chat_completion_json(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.7,
+                    max_tokens=1800,
+                ),
+                timeout=60,
+            )
+
+            def _parse(text: str):
+                import re
+                m = re.search(r'\[.*\]', text, re.DOTALL)
+                if m:
+                    return json.loads(m.group())
+                parsed = json.loads(text)
+                if isinstance(parsed, dict) and "questions" in parsed:
+                    return parsed["questions"]
+                return parsed if isinstance(parsed, list) else []
+
+            llm_questions = await run_in_threadpool(_parse, response_text)
+            if not llm_questions:
+                return QuestionGeneratorService._generate_mock_analytical_questions(num_questions, role_name)
+
+            time_limits = {"easy": 180, "medium": 300, "hard": 420}
+            formatted = []
+            for i, q in enumerate(llm_questions[:num_questions], 1):
+                difficulty = str(q.get("difficulty", "medium")).lower()
+                if difficulty not in ("easy", "medium", "hard"):
+                    difficulty = "medium"
+                formatted.append({
+                    "question_id": str(uuid.uuid4()),
+                    "question_type": "static",
+                    "order": i,
+                    "prompt": q.get("question", ""),
+                    "difficulty": difficulty,
+                    "time_limit_sec": time_limits.get(difficulty, 300),
+                    "answer_mode": "text",
+                    "evaluation_mode": "text",
+                    "source": "llm_generated",
+                    "category": "ANALYTICAL",
+                    "focus": q.get("focus", "structured problem solving"),
+                })
+            return formatted
+        except Exception as e:
+            logger.error(f"Error generating analytical questions with LLM: {e}", exc_info=True)
+            return QuestionGeneratorService._generate_mock_analytical_questions(num_questions, role_name)
+
+    @staticmethod
+    def _generate_mock_analytical_questions(
+        num_questions: int,
+        role_name: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        import uuid
+        bank = [
+            ("Estimate the number of daily rides in your city. Explain assumptions and approach.", "guesstimate"),
+            ("A team misses deadlines repeatedly. How would you diagnose root causes and fix the process?", "process improvement"),
+            ("You have 20% budget cut across 5 initiatives. How would you prioritize what to keep?", "prioritization"),
+            ("A new store has low conversion despite good footfall. How would you investigate?", "business case"),
+            ("How would you estimate market size for a new subscription service in your region?", "market sizing"),
+        ]
+        out = []
+        for i in range(max(1, num_questions)):
+            q, focus = bank[i % len(bank)]
+            out.append({
+                "question_id": str(uuid.uuid4()),
+                "question_type": "static",
+                "order": i + 1,
+                "prompt": q,
+                "difficulty": "medium" if i < 2 else "hard",
+                "time_limit_sec": 300 if i < 2 else 420,
+                "answer_mode": "audio",
+                "evaluation_mode": "audio",
+                "source": "mock_analytical_fallback",
+                "category": "ANALYTICAL",
+                "focus": focus,
+            })
+        return out
+
+    @staticmethod
+    async def _regenerate_analytical_question_with_llm(
+        existing_question: Dict[str, Any],
+        all_questions: List[Dict[str, Any]],
+        comment: Optional[str],
+        role_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        try:
+            import uuid
+            import json
+            import asyncio
+            from fastapi.concurrency import run_in_threadpool
+
+            if not azure_openai_service.async_client and not azure_openai_service.client:
+                return {
+                    **existing_question,
+                    "question_id": str(uuid.uuid4()),
+                    "prompt": f"{existing_question.get('prompt', '')} (refined)",
+                    "category": "ANALYTICAL",
+                    "source": "mock_analytical_regen",
+                }
+
+            current_questions_text = "\n".join([f"- {q.get('prompt')}" for q in all_questions])
+            system_prompt = """You regenerate ONE non-technical analytical interview question.
+Must be different from existing questions.
+No coding/tech stack/system design questions.
+Return JSON object:
+{"question":"...", "difficulty":"medium|hard", "category":"ANALYTICAL", "focus":"..."}"""
+            user_prompt = f"""Regenerate this analytical question:
+{existing_question.get('prompt')}
+
+Comment: {comment or "Make it sharper and more realistic for business roles"}
+Role: {role_name or "Business Analyst / Manager"}
+Existing questions (avoid overlap):
+{current_questions_text}
+Return JSON only."""
+
+            content = await asyncio.wait_for(
+                azure_openai_service.chat_completion_json(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.7,
+                    max_tokens=800,
+                    response_format={"type": "json_object"},
+                ),
+                timeout=60,
+            )
+            llm_q = await run_in_threadpool(json.loads, content)
+            diff = str(llm_q.get("difficulty", existing_question.get("difficulty", "medium"))).lower()
+            if diff not in ("easy", "medium", "hard"):
+                diff = "medium"
+            return {
+                "question_id": str(uuid.uuid4()),
+                "question_type": "static",
+                "order": existing_question.get("order", 1),
+                "prompt": llm_q.get("question", ""),
+                "difficulty": diff,
+                "time_limit_sec": 300 if diff == "medium" else 420,
+                "answer_mode": "audio",
+                "evaluation_mode": "audio",
+                "source": "llm_analytical_regenerated",
+                "category": "ANALYTICAL",
+                "focus": llm_q.get("focus", "analytical reasoning"),
+            }
+        except Exception as e:
+            logger.error(f"Error regenerating analytical question: {e}")
+            return {
+                **existing_question,
+                "source": "analytical_regeneration_failed"
             }
 
     @staticmethod

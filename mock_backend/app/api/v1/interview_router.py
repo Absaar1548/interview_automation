@@ -96,7 +96,11 @@ async def preview_template(
             return {
                 "interview_id": str(existing_draft.id),
                 "technical_section": {"questions": tech_questions},
-                "coding_section": curated.get("coding_section") or {"problems": (template.coding_config or {}).get("problems", [])},
+                "coding_section": curated.get("coding_section") or {
+                    "problem_solving_type": "coding",
+                    "problems": [],
+                    "questions": []
+                },
                 "conversational_section": curated.get("conversational_section") or {"rounds": (template.conversational_config or {}).get("rounds", 0)}
             }
         
@@ -142,7 +146,11 @@ async def preview_template(
         return {
             "interview_id": str(draft.id),
             "technical_section": {"questions": questions},
-            "coding_section": curated_questions.get("coding_section") or {"problems": []},
+            "coding_section": curated_questions.get("coding_section") or {
+                "problem_solving_type": "coding",
+                "problems": [],
+                "questions": []
+            },
             "conversational_section": curated_questions.get("conversational_section") or {"rounds": (template.conversational_config or {}).get("rounds", 0) if template else 0}
         }
         

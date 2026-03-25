@@ -51,7 +51,7 @@ def _get_client():
     return OpenAI(**kwargs)
 
 
-def generate_conversation_questions(
+async def generate_conversation_questions(
     resume_text: str,
     jd_text: str,
     template_id: str,
@@ -71,15 +71,18 @@ def generate_conversation_questions(
     jd_text = (jd_text or "").strip() or "(No job description provided)"
     user_prompt = USER_PROMPT_TEMPLATE.format(resume_text=resume_text[:12000], jd_text=jd_text[:4000])
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.6,
-        )
-        content = (response.choices[0].message.content or "").strip()
+        import anyio
+        def _call_sync():
+            return client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.6,
+            ).choices[0].message.content or ""
+        content = await anyio.to_thread.run_sync(_call_sync)
+        content = content.strip()
         if not content:
             return None
         # Parse JSON (handle optional markdown code block)

@@ -189,11 +189,18 @@ class TemplateEngineService:
         session: AsyncSession
     ) -> List[CodingProblemItem]:
         """
-        Generate coding problems from coding_config:
-        { "count": 2, "difficulty": ["medium", "hard"] }
+        Generate coding problems from coding_config when problem_solving_type is coding.
+        coding_config example:
+        { "problem_solving_type": "coding", "count": 2, "difficulty": ["medium", "hard"] }
         """
         config = template.coding_config or {}
         if not isinstance(config, dict):
+            return []
+
+        problem_solving_type = str(
+            config.get("problem_solving_type") or config.get("problem_type") or "coding"
+        ).strip().lower()
+        if problem_solving_type in ("analytical", "analytical_question", "analytical_questions", "non_coding", "non-coding"):
             return []
 
         count = config.get("count", 0)

@@ -13,6 +13,7 @@ interface CodingQuestionProps {
 }
 
 export default function CodingQuestion({ question, interviewId }: CodingQuestionProps) {
+    const goToSectionSelector = useInterviewStore((s) => s.goToSectionSelector)
     const {
         setProblemFromInterview,
         problem,
@@ -114,6 +115,12 @@ export default function CodingQuestion({ question, interviewId }: CodingQuestion
             <nav className="h-12 flex items-center justify-between px-4 bg-[#16162a] border-b border-[#2a2a4a] shrink-0 select-none">
                 {/* Left: Section label + Timer */}
                 <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => goToSectionSelector()}
+                        className="px-2.5 py-1 border border-[#3a3a5a] rounded-md text-[10px] font-bold text-[#c4c4cc] hover:bg-[#252545] transition-colors"
+                    >
+                        Home
+                    </button>
                     <div className="flex items-center gap-2">
                         <svg className="w-5 h-5 text-[#4a9eff]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />

@@ -18,7 +18,7 @@ class AnswerEvaluationService:
     """Service to evaluate candidate answers and assign scores."""
     
     @staticmethod
-    def evaluate_answer(
+    async def evaluate_answer(
         question: Dict[str, Any],
         answer_text: Optional[str] = None,
         answer_audio_url: Optional[str] = None,
@@ -50,7 +50,7 @@ class AnswerEvaluationService:
                 "suggestions": ["Expand on architecture decisions"],
             }
 
-        if not azure_openai_service.client:
+        if not azure_openai_service.async_client and not azure_openai_service.client:
             logger.warning("Azure OpenAI not configured, returning mock evaluation")
             return AnswerEvaluationService._generate_mock_evaluation(question)
         
@@ -58,15 +58,34 @@ class AnswerEvaluationService:
             # Prepare answer content
             answer_content = answer_text or f"[Audio answer available at: {answer_audio_url}]"
             
+            is_analytical = str(question.get("category", "")).upper() == "ANALYTICAL" or \
+                "analytical" in str(question.get("focus", "")).lower() or \
+                "guesstimate" in str(question.get("prompt", "")).lower() or \
+                "estimate" in str(question.get("prompt", "")).lower()
+
             # Build evaluation prompt
-            system_prompt = """You are an expert technical interviewer evaluating a candidate's answer.
+            if is_analytical:
+                system_prompt = """You are an expert interviewer evaluating NON-TECHNICAL analytical problem-solving answers.
+Evaluate on a scale of 0-10 based on:
+- Structured thinking and clear framework
+- Quality of assumptions (for estimation/guesstimate)
+- Logic and reasoning quality
+- Business judgment / prioritization rationale
+- Communication clarity and conciseness
+- Awareness of trade-offs and risks
+
+Do NOT evaluate coding or technical implementation details."""
+            else:
+                system_prompt = """You are an expert technical interviewer evaluating a candidate's answer.
 Evaluate the answer on a scale of 0-10 based on:
 - Technical correctness and accuracy
 - Depth of understanding
 - Clarity and communication
 - Relevance to the question
 - Problem-solving approach
-- Use of appropriate examples and explanations
+- Use of appropriate examples and explanations"""
+
+            system_prompt += """
 
 Return ONLY valid JSON with this structure:
 {
@@ -104,7 +123,7 @@ Evaluate the answer and provide:
 
 Return ONLY the JSON object, no additional text."""
 
-            response = azure_openai_service.client.chat.completions.create(
+            content = await azure_openai_service.chat_completion_json(
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -116,7 +135,7 @@ Return ONLY the JSON object, no additional text."""
             )
             
             import json
-            evaluation = json.loads(response.choices[0].message.content)
+            evaluation = json.loads(content)
             
             # Ensure score is between 0-10
             score = max(0, min(10, float(evaluation.get('score', 5))))

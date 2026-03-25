@@ -192,9 +192,12 @@ class InterviewSessionSQLService:
                             max_conv = conv_config.get("rounds", 10)
                     total_q = max_conv
 
+                display_type = s.section_type
+                if s.section_type == "coding":
+                    display_type = "problem_solving"
                 res.append({
                     "id": str(s.id),
-                    "section_type": s.section_type,
+                    "section_type": display_type,
                     "order_index": s.order_index,
                     "duration_minutes": s.duration_minutes,
                     "status": s.status,
@@ -654,10 +657,18 @@ class InterviewSessionSQLService:
                     answer_mode = "AUDIO"
 
             answer_mode = answer_mode.upper() if answer_mode else "TEXT"
+            section_response_type = "technical"
+            if session_obj.current_section_id and q.section_id == session_obj.current_section_id:
+                from app.db.sql.models.interview_session_section import InterviewSessionSection
+                current_section = await uow.session.get(InterviewSessionSection, session_obj.current_section_id)
+                if current_section and current_section.section_type == "coding" and q_type == "technical":
+                    # Problem-solving analytical mode should support spoken answers.
+                    answer_mode = "AUDIO"
+                    section_response_type = "analytical"
             prompt = q.custom_text or (q.question.text if q.question else "Please answer the following question.")
 
             return {
-                "type": "technical",
+                "type": section_response_type,
                 "question_id": str(q.id),
                 "question_text": prompt,
                 "answer_mode": answer_mode,
@@ -868,7 +879,7 @@ class InterviewSessionSQLService:
                     "conversation_config": {"round": current_question.conversation_round},
                 }
 
-                evaluation = answer_evaluation_service.evaluate_answer(
+                evaluation = await answer_evaluation_service.evaluate_answer(
                     question=question_data,
                     answer_text=answer_text,
                     answer_audio_url=answer_audio_url,
@@ -916,7 +927,7 @@ class InterviewSessionSQLService:
                 answer_audio_url = answer_payload.get("answer_payload") if answer_payload.get("answer_type") == "AUDIO" else None
                 answer_mode = answer_payload.get("answer_type", "TEXT").lower()
 
-                evaluation = answer_evaluation_service.evaluate_answer(
+                evaluation = await answer_evaluation_service.evaluate_answer(
                     question=question_data,
                     answer_text=answer_text,
                     answer_audio_url=answer_audio_url,

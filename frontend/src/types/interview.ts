@@ -94,7 +94,11 @@ export interface TemplatePreviewQuestion {
 export interface TemplatePreviewResponse {
     interview_id?: string;
     technical_section: { questions: TemplatePreviewQuestion[] };
-    coding_section: { problems: { problem_id: string; title: string; difficulty: string }[] };
+    coding_section: {
+        problem_solving_type?: 'coding' | 'analytical';
+        problems?: { problem_id: string; title: string; difficulty: string }[];
+        questions?: TemplatePreviewQuestion[];
+    };
     conversational_section: { rounds: number; description: string };
 }
 

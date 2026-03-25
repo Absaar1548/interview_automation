@@ -83,7 +83,9 @@ class CodingProblemItem(BaseModel):
     starter_code: Optional[dict] = None
 
 class CodingSection(BaseModel):
-    problems: List[CodingProblemItem]
+    problem_solving_type: Optional[Literal["coding", "analytical"]] = "coding"
+    problems: Optional[List[CodingProblemItem]] = None
+    questions: Optional[List[CuratedQuestionItem]] = None
 
 class ConversationalSection(BaseModel):
     rounds: int
@@ -96,6 +98,7 @@ class CuratedQuestionsPayload(BaseModel):
     questions: Optional[List[CuratedQuestionItem]] = None
     technical_section: Optional[TechnicalSection] = None
     coding_section: Optional[CodingSection] = None
+    problem_solving_section: Optional[CodingSection] = None
     conversational_section: Optional[ConversationalSection] = None
 
 

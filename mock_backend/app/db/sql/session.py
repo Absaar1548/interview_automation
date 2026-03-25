@@ -37,9 +37,9 @@ get_db = get_db_session
 
 async def test_database_connection():
     """
-    Test the connection to the database. Exits the app if connection fails.
+    Test the connection to the database.
+    Raises RuntimeError on failure so caller can decide strict/lenient behavior.
     """
-    import sys
     from sqlalchemy import text
     try:
         async with engine.begin() as conn:
@@ -47,4 +47,4 @@ async def test_database_connection():
         logger.info("Successfully established connection to the database.")
     except Exception as e:
         logger.critical(f"Failed to connect to the database: {e}")
-        sys.exit(1)
+        raise RuntimeError("Database connection check failed") from e

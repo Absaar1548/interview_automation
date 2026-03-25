@@ -88,8 +88,47 @@ class AzureOpenAIService:
         except Exception as e:
             logger.error(f"Failed to initialize Azure OpenAI client: {e}", exc_info=True)
             self.client = None
+            self.async_client = None
+
+    async def chat_completion_json(
+        self,
+        messages: list[dict],
+        *,
+        model: str = "gpt-4o",
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        response_format: Optional[dict] = None,
+    ) -> str:
+        """
+        Async helper to call chat.completions and return the message content string.
+        Falls back to sync client in a thread if async client is unavailable.
+        """
+        if not self.async_client and not self.client:
+            raise RuntimeError("Azure OpenAI client is not initialized")
+        
+        if self.async_client:
+            resp = await self.async_client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+            )
+            return resp.choices[0].message.content
+        
+        # Fallback: run sync client in threadpool to avoid blocking event loop
+        import anyio
+        def _call_sync():
+            return self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+            ).choices[0].message.content
+        return await anyio.to_thread.run_sync(_call_sync)
     
-    def generate_conversational_questions(
+    async def generate_conversational_questions(
         self,
         resume_data: Dict[str, Any],
         jd_data: Dict[str, Any],
@@ -106,7 +145,7 @@ class AzureOpenAIService:
         Returns:
             List of question dictionaries with difficulty progression
         """
-        if not self.client:
+        if not self.async_client and not self.client:
             logger.warning("Azure OpenAI not configured, returning mock questions")
             return self._generate_mock_questions(resume_data, jd_data, num_questions)
         
@@ -125,25 +164,22 @@ class AzureOpenAIService:
                 jd_skills=jd_data.get('required_skills', []) 
             )
             
-            # Call Azure OpenAI
-            response = self.client.chat.completions.create(
-                model="gpt-4o",  # or your deployment name
+            # Call Azure OpenAI (async)
+            content = await self.chat_completion_json(
+                model="gpt-4o",
                 messages=[
                     {
                         "role": "system",
                         "content": "You are an expert technical interviewer. Generate conversational interview questions based on the candidate's resume and job requirements. Focus on projects and technologies mentioned."
                     },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
                 max_tokens=2000
             )
             
             # Parse response
-            questions = self._parse_question_response(response.choices[0].message.content)
+            questions = self._parse_question_response(content)
             
             # Ensure we have the right number and difficulty progression: 1-2 medium, then hard
             return self._format_questions_with_difficulty(questions, num_questions, projects, medium_first=2)
@@ -353,7 +389,7 @@ Return ONLY the JSON array, no additional text."""
         
         return questions[:num_questions]
     
-    def generate_project_drilldown_questions(
+    async def generate_project_drilldown_questions(
         self,
         project: Dict[str, Any],
         resume_data: Dict[str, Any],
@@ -364,7 +400,7 @@ Return ONLY the JSON array, no additional text."""
         Generate drill-down hard questions for a specific project.
         These are follow-up questions that test deep understanding.
         """
-        if not self.client:
+        if not self.async_client and not self.client:
             logger.warning("Azure OpenAI not configured, returning mock questions")
             return self._generate_mock_drilldown_questions(project, num_questions)
         
@@ -411,7 +447,7 @@ Generate questions that:
 
 Return ONLY the JSON array, no additional text."""
 
-            response = self.client.chat.completions.create(
+            content = await self.chat_completion_json(
                 model="gpt-4o",
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -423,7 +459,6 @@ Return ONLY the JSON array, no additional text."""
             )
             
             # Parse response
-            content = response.choices[0].message.content
             import json
             parsed = json.loads(content)
             

@@ -15,6 +15,20 @@ logger = logging.getLogger(__name__)
 
 class InterviewSQLService:
     @staticmethod
+    def _normalize_problem_solving_type(coding_config: Optional[dict]) -> str:
+        cfg = coding_config or {}
+        raw = (
+            cfg.get("problem_solving_type")
+            or cfg.get("problem_type")
+            or cfg.get("type")
+            or "coding"
+        )
+        raw_s = str(raw).strip().lower()
+        if raw_s in ("analytical", "analytical_question", "analytical_questions", "non_coding", "non-coding"):
+            return "analytical"
+        return "coding"
+
+    @staticmethod
     async def get_active_interview_for_candidate(session: AsyncSession, candidate_id: uuid.UUID) -> Optional[Dict[str, Any]]:
         async with UnitOfWork(session) as uow:
             # Replaces repo.get_active_or_inprogress_for_candidate
@@ -286,30 +300,43 @@ class InterviewSQLService:
                         uow.session.add(session_question)
                         order_idx += 1
                     
-            # 2. ADD CODING QUESTIONS FROM TEMPLATE
-            # NOTE: Conversational questions are NOT created here - they are generated LIVE
-            # when the candidate enters the conversational section, based on their projects
+            # 2. ADD PROBLEM-SOLVING QUESTIONS FOR SECTION 2
             if interview.template_id:
                 from app.db.sql.models.interview_template import InterviewTemplate
                 from app.services.template_engine import template_engine, CodingProblemItem
                 
                 template = await uow.session.get(InterviewTemplate, interview.template_id)
                 if template:
-                    generated_items = await template_engine.generate_interview_questions(template, uow.session)
-                    for item in generated_items:
-                        # Only process coding problems, skip conversational (they're generated live)
-                        if isinstance(item, CodingProblemItem):
+                    ps_type = InterviewSQLService._normalize_problem_solving_type(template.coding_config or {})
+                    if ps_type == "coding":
+                        generated_items = await template_engine.generate_interview_questions(template, uow.session)
+                        for item in generated_items:
+                            if isinstance(item, CodingProblemItem):
+                                session_q = InterviewSessionQuestion(
+                                    interview_session_id=new_session.id,
+                                    section_id=section_map["coding"],
+                                    question_type="coding",
+                                    coding_problem_id=item.coding_problem_id,
+                                    order=order_idx,
+                                )
+                                uow.session.add(session_q)
+                                order_idx += 1
+                    else:
+                        # Analytical mode: use generated problem-solving questions (non-coding)
+                        analytical_questions = (
+                            (interview.curated_questions or {}).get("coding_section", {}).get("questions", [])
+                        )
+                        for q_data in analytical_questions:
                             session_q = InterviewSessionQuestion(
                                 interview_session_id=new_session.id,
                                 section_id=section_map["coding"],
-                                question_type="coding",
-                                coding_problem_id=item.coding_problem_id,
+                                question_type="technical",
+                                question_id=None,
+                                custom_text=q_data.get("prompt") or q_data.get("text") or "Analytical question",
                                 order=order_idx,
                             )
                             uow.session.add(session_q)
                             order_idx += 1
-                        # Skip ConversationalRoundItem - these are generated live when section starts
-                        # No placeholder questions should be created
 
             await uow.flush()
 
