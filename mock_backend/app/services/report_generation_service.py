@@ -171,9 +171,12 @@ class ReportGenerationService:
         interview.overall_score = report["overall_score"]
         interview.feedback = report["recommendation_reason"]
         
-        # 3️⃣ Commit using the existing session
+        # 3️⃣ Flush so changes are staged in the current transaction.
+        # Do NOT call session.commit() here — this method is typically called from
+        # inside an active UnitOfWork context; committing here would cause a
+        # double-commit / TransactionAlreadyClosed error under concurrent load.
         session.add(interview)
-        await session.commit()
+        await session.flush()
         
         logger.info(f"Generated and persisted report for interview {interview_id}")
         return report

@@ -109,7 +109,7 @@ class QuestionGeneratorService:
                 # If we have resume text but no parsed JSON, parse it now with LLM
                 logger.debug("Parsing resume text with LLM...")
                 from app.services.resume_parser import parse_resume_with_llm
-                resume_data = parse_resume_with_llm(resume_text)
+                resume_data = await parse_resume_with_llm(resume_text)  # ← was missing await
                 if not isinstance(resume_data, dict):
                     resume_data = {}
                 resume_data['text'] = resume_text
