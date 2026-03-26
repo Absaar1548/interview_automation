@@ -10,6 +10,8 @@ from jose import JWTError, jwt
 import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import pypdf
+import io
 
 from app.schemas.auth import TokenResponse, LoginRequest, CandidateResponse, AdminRegistrationRequest, AdminResponse, PaginatedCandidateResponse
 from app.db.sql.session import get_db_session
@@ -278,6 +280,10 @@ async def admin_register_candidate(
         existing_user = await uow.users.get_by_username(username)
         if existing_user:
              raise HTTPException(status_code=400, detail="Candidate with this email/username already exists")
+             
+        # JD Limit: ~5 pages = 2500 words
+        if job_description and len(job_description.split()) > 2500:
+             raise HTTPException(status_code=400, detail="Job description exceeds the maximum length of 5 pages (approx 2500 words).")
     
         password = secrets.token_urlsafe(12)
         hashed_password = get_password_hash(password)
@@ -292,6 +298,15 @@ async def admin_register_candidate(
         resume_bytes = await resume.read()
         if len(resume_bytes) == 0:
             raise HTTPException(status_code=400, detail="Resume file is empty")
+            
+        try:
+            reader = pypdf.PdfReader(io.BytesIO(resume_bytes))
+            if len(reader.pages) > 10:
+                raise HTTPException(status_code=400, detail="Resume exceeds the maximum length of 10 pages.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Could not verify PDF page count for {candidate_email}: {e}")
         
         resume_filename = f"{resume_id}.pdf"
         resume_path_full = os.path.join(upload_dir, resume_filename)

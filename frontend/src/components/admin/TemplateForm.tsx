@@ -97,18 +97,42 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
         setError('');
 
         // ── Validation ──────────────────────────────────────────────────────────
-        if (easyCount < 0 || mediumCount < 0 || hardCount < 0) {
-            setError('Technical question counts cannot be negative.');
+        if (easyCount < 0 || mediumCount < 0 || hardCount < 0 || codingCount < 0 || convRounds < 0) {
+            setError('Question counts cannot be negative.');
             return;
         }
-        if (codingCount < 0) {
-            setError('Problem solving question count cannot be negative.');
+
+        const totalTech = Number(easyCount) + Number(mediumCount) + Number(hardCount);
+        if (totalTech > 10) {
+            setError('⚠️ Total technical questions cannot exceed 10. Values have been reset — please review and resubmit.');
+            // Proportionally scale down to 10
+            const scale = 10 / totalTech;
+            setEasyCount(Math.floor(easyCount * scale));
+            setMediumCount(Math.floor(mediumCount * scale));
+            setHardCount(10 - Math.floor(easyCount * scale) - Math.floor(mediumCount * scale));
             return;
         }
-        if (convRounds < 0) {
-            setError('Conversational rounds cannot be negative.');
+
+        if (codingCount > 10) {
+            setError(`⚠️ ${problemSolvingType === 'coding' ? 'Coding problems' : 'Analytical questions'} cannot exceed 10. Reset to 10 — please review and resubmit.`);
+            setCodingCount(10);
             return;
         }
+
+        if (convRounds > 10) {
+            setError('⚠️ Conversational rounds cannot exceed 10. Reset to 10 — please review and resubmit.');
+            setConvRounds(10);
+            return;
+        }
+
+        if (techDuration > 60 || codingDuration > 60 || convDuration > 60) {
+            setError('⚠️ Section duration cannot exceed 60 minutes. Values have been reset — please review and resubmit.');
+            if (techDuration > 60) setTechDuration(60);
+            if (codingDuration > 60) setCodingDuration(60);
+            if (convDuration > 60) setConvDuration(60);
+            return;
+        }
+
         // If coding mode is selected and count > 0, at least one coding difficulty is required
         if (problemSolvingType === 'coding' && codingCount > 0 && codingDifficulties.length === 0) {
             setError('Select at least one difficulty level for Coding mode in Problem Solving section.');
@@ -270,8 +294,9 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                         <input
                                             type="number" min={0} value={val}
                                             onChange={e => setter(Number(e.target.value))}
-                                            className="w-full px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm"
+                                            className={`w-full px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm ${val > 10 ? 'border-red-500' : ''}`}
                                         />
+                                        {val > 10 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 10</p>}
                                     </div>
                                 ))}
                                 <div>
@@ -279,8 +304,9 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                     <input
                                         type="number" min={1} value={techDuration}
                                         onChange={e => setTechDuration(Number(e.target.value))}
-                                        className="w-full px-3 py-2 text-gray-900 bg-white rounded-lg border border-blue-200 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
+                                        className={`w-full px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm focus:ring-1 focus:ring-blue-500 outline-none ${techDuration > 60 ? 'border-red-500' : 'border-blue-200'}`}
                                     />
+                                    {techDuration > 60 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 60 min</p>}
                                 </div>
                             </div>
                             <p className="text-xs text-gray-400">
@@ -340,8 +366,9 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                         type="number" min={0} value={codingCount}
                                         onChange={e => setCodingCount(Number(e.target.value))}
                                         placeholder="0"
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm ${codingCount > 10 ? 'border-red-500' : ''}`}
                                     />
+                                    {codingCount > 10 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 10</p>}
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1 text-purple-600">
@@ -350,8 +377,9 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                     <input
                                         type="number" min={1} value={codingDuration}
                                         onChange={e => setCodingDuration(Number(e.target.value))}
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border border-purple-200 text-sm focus:ring-1 focus:ring-purple-500 outline-none"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm focus:ring-1 focus:ring-purple-500 outline-none ${codingDuration > 60 ? 'border-red-500' : 'border-purple-200'}`}
                                     />
+                                    {codingDuration > 60 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 60 min</p>}
                                 </div>
                             </div>
                             {problemSolvingType === 'coding' ? (
@@ -406,16 +434,18 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                         type="number" min={0} value={convRounds}
                                         onChange={e => setConvRounds(Number(e.target.value))}
                                         placeholder="0"
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm ${convRounds > 10 ? 'border-red-500' : ''}`}
                                     />
+                                    {convRounds > 10 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 10</p>}
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1 text-emerald-600">Duration (min)</label>
                                     <input
                                         type="number" min={1} value={convDuration}
                                         onChange={e => setConvDuration(Number(e.target.value))}
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border border-emerald-200 text-sm focus:ring-1 focus:ring-emerald-500 outline-none"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm focus:ring-1 focus:ring-emerald-500 outline-none ${convDuration > 60 ? 'border-red-500' : 'border-emerald-200'}`}
                                     />
+                                    {convDuration > 60 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 60 min</p>}
                                 </div>
                             </div>
                             <p className="text-xs text-gray-400">
