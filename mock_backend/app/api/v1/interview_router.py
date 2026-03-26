@@ -32,6 +32,7 @@ from app.schemas.interview_template import TemplatePreviewResponse
 
 logger = logging.getLogger(__name__)
 from app.services.interview_admin_sql_service import InterviewAdminSQLService
+from app.services.interview_session_sql_service import InterviewSessionSQLService
 from app.services.template_engine import template_engine
 from app.db.sql.enums import InterviewStatus
 from app.db.sql.unit_of_work import UnitOfWork
@@ -249,6 +250,22 @@ async def get_interview_summary(
         "limit": limit,
         "offset": offset
     }
+
+
+@router.get(
+    "/{interview_id}/feedback",
+    summary="Get candidate feedback for a completed interview",
+)
+async def get_candidate_feedback(
+    interview_id: str,
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session),
+):
+    validated_iid = validate_uuid(interview_id)
+    return await InterviewSessionSQLService.get_candidate_feedback_by_interview(
+        session=session,
+        interview_id=validated_iid,
+    )
 
 
 @router.put(

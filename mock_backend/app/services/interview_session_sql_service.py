@@ -772,6 +772,12 @@ class InterviewSessionSQLService:
                 all_completed = all(s.status == "completed" for s in all_sections)
                 
                 if all_completed:
+                    if not interview.candidate_feedback:
+                        # Do not auto-complete until candidate submits mandatory feedback.
+                        return_state = "READY"
+                        await uow.flush()
+                        return {"state": return_state}
+
                     return_state = "COMPLETED"
                     
                     score_stmt = select(func.avg(InterviewResponse.ai_score)).where(
@@ -1098,6 +1104,12 @@ class InterviewSessionSQLService:
                 uow, session_id, candidate_id, with_for_update=True
             )
 
+            if not interview.candidate_feedback:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Candidate feedback is required before final interview submission."
+                )
+
             now = datetime.now(timezone.utc)
             
             # 1️⃣ Calculate average score
@@ -1128,6 +1140,34 @@ class InterviewSessionSQLService:
             )
 
             return {"state": "COMPLETED"}
+
+    @staticmethod
+    async def submit_candidate_feedback(
+        session: AsyncSession,
+        session_id: uuid.UUID,
+        candidate_id: uuid.UUID,
+        feedback_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        async with UnitOfWork(session) as uow:
+            _, interview = await InterviewSessionSQLService._get_session_and_interview(
+                uow, session_id, candidate_id, with_for_update=True
+            )
+            interview.candidate_feedback = feedback_payload
+            await uow.flush()
+            return {"saved": True}
+
+    @staticmethod
+    async def get_candidate_feedback_by_interview(
+        session: AsyncSession,
+        interview_id: uuid.UUID,
+    ) -> Dict[str, Any]:
+        async with UnitOfWork(session) as uow:
+            interview = await uow.interviews.get_by_id(interview_id)
+            if not interview:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+            if not interview.candidate_feedback:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not submitted yet")
+            return interview.candidate_feedback
 
     @staticmethod
     async def get_summary(

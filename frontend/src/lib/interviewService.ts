@@ -8,6 +8,7 @@ import {
     ProctoringEventRequest,
     EvaluationSubmitResponse,
     ProctoringEventResponse,
+    CandidateFeedbackRequest,
 } from "@/types/api";
 
 class InterviewService {
@@ -150,6 +151,14 @@ class InterviewService {
         }
 
         return response.state;
+    }
+
+    async submitCandidateFeedback(payload: CandidateFeedbackRequest): Promise<{ saved: boolean }> {
+        return apiClient.post<{ saved: boolean }, CandidateFeedbackRequest>(
+            "/api/v1/candidate/interview/feedback",
+            payload,
+            true
+        );
     }
 
     terminate(): void {

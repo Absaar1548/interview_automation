@@ -59,6 +59,24 @@ export interface EvaluationSubmitResponse {
     state: InterviewState;
 }
 
+export interface CandidateFeedbackRequest {
+    name: string;
+    email: string;
+    overall_experience: string;
+    comfortable_with_tool: string;
+    ease_of_navigation: string;
+    clarity_of_instruction: string;
+    ui_feedback: string;
+    flow_of_interview: string;
+    interview_was_logical: string;
+    length_of_interview: string;
+    system_responsiveness: string;
+    questions_asked: string;
+    difficulty_level: string;
+    would_you_trust_app: string;
+    recommendation: string;
+}
+
 export interface SummaryResponse {
     final_score: number;
     recommendation: Recommendation;

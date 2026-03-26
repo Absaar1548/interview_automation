@@ -26,6 +26,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth_router import get_current_active_user
@@ -37,6 +38,24 @@ from app.services.interview_session_sql_service import InterviewSessionSQLServic
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class CandidateFeedbackPayload(BaseModel):
+    name: str
+    email: EmailStr
+    overall_experience: str
+    comfortable_with_tool: str
+    ease_of_navigation: str
+    clarity_of_instruction: str
+    ui_feedback: str
+    flow_of_interview: str
+    interview_was_logical: str
+    length_of_interview: str
+    system_responsiveness: str
+    questions_asked: str
+    difficulty_level: str
+    would_you_trust_app: str
+    recommendation: str
 
 # SocketIO instance will be set from main.py
 _sio = None
@@ -496,3 +515,21 @@ async def complete_interview(
     
     logger.info(f"[complete_interview] Session {session_id} completed by candidate {current_user.id}")
     return result
+
+
+@router.post("/candidate/interview/feedback")
+async def submit_candidate_feedback(
+    payload: CandidateFeedbackPayload,
+    x_interview_id: Optional[str] = Header(None, alias="X-Interview-Id"),
+    current_user: User = Depends(_get_current_candidate),
+    session: AsyncSession = Depends(get_db_session),
+):
+    if not x_interview_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="X-Interview-Id header is required")
+    session_id = validate_uuid(x_interview_id)
+    return await InterviewSessionSQLService.submit_candidate_feedback(
+        session=session,
+        session_id=session_id,
+        candidate_id=current_user.id,
+        feedback_payload=payload.model_dump(),
+    )

@@ -315,3 +315,29 @@ export async function regenerateQuestion(
     if (!res.ok) throw await parseError(res);
     return res.json();
 }
+
+export interface CandidateFeedbackData {
+    name: string;
+    email: string;
+    overall_experience: string;
+    comfortable_with_tool: string;
+    ease_of_navigation: string;
+    clarity_of_instruction: string;
+    ui_feedback: string;
+    flow_of_interview: string;
+    interview_was_logical: string;
+    length_of_interview: string;
+    system_responsiveness: string;
+    questions_asked: string;
+    difficulty_level: string;
+    would_you_trust_app: string;
+    recommendation: string;
+}
+
+export async function fetchInterviewFeedback(interviewId: string): Promise<CandidateFeedbackData> {
+    const res = await fetch(`${BASE_URL}/api/v1/admin/interviews/${interviewId}/feedback`, {
+        headers: authHeaders(),
+    });
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+}
