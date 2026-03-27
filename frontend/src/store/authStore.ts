@@ -6,6 +6,7 @@ import { AuthRequest } from "@/types/api";
 
 interface User {
     username: string;
+    email?: string;
     role: string;
 }
 
