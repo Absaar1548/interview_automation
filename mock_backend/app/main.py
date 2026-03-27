@@ -63,7 +63,18 @@ socketio_logger.propagate = False
 async def lifespan(app: FastAPI):
     # ── Step 1: Verify database connectivity ──────────────────────────────────
     logger.info("Initializing application and checking database connection...")
-    await test_database_connection()
+    strict_db_check = os.getenv("STRICT_DB_CHECK", "false").lower() == "true"
+    try:
+        await test_database_connection()
+    except Exception as exc:
+        if strict_db_check:
+            logger.critical("Database connection failed and STRICT_DB_CHECK=true. Aborting startup.")
+            raise
+        logger.warning(
+            "Database connection failed during startup (STRICT_DB_CHECK=false). "
+            "App will start, but DB-backed endpoints may fail until DB is available. Error: %s",
+            exc,
+        )
 
     yield
     # ── Shutdown ──────────────────────────────────────────────────────────────
@@ -71,10 +82,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Interview Automation Mock Backend", lifespan=lifespan)
 
+# Keep FastAPI CORS and Socket.IO CORS in sync.
+allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+
 # Initialize SocketIO with async mode and CORS support
 sio = socketio.AsyncServer(
     async_mode='asgi',
-    cors_allowed_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3002").split(","),
+    cors_allowed_origins=allowed_origins,
     logger=False,
     engineio_logger=False,
     ping_timeout=60,
@@ -85,7 +99,7 @@ socketio_app = socketio.ASGIApp(sio, app)
 # CORS Middleware - Allow all origins in development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:3002").split(","),
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -101,7 +115,7 @@ app.include_router(candidate_profile_router.router, prefix="/api/v1/candidate", 
 app.include_router(session_router.router, prefix="/api/v1", tags=["Session"])
 app.include_router(verification_router.router, prefix="/api/v1/verification", tags=["Verification"])
 app.include_router(template_router.router, tags=["Admin Templates"])
-app.include_router(coding_router.router, prefix="/api/v1/candidate", tags=["Coding"])
+app.include_router(coding_router.router, prefix="/api/v1/candidate", tags=["Coding"]) 
 
 # Initialize SocketIO handlers in session_router
 from app.api.v1.session_router import set_sio

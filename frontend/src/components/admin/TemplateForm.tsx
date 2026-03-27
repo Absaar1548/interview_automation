@@ -59,7 +59,7 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
 
     // Section collapse states
     const [techOpen, setTechOpen] = useState(true);
-    const [codingOpen, setCodingOpen] = useState(true);
+    const [problemSolvingOpen, setProblemSolvingOpen] = useState(true);
     const [convOpen, setConvOpen] = useState(true);
 
     // ── Technical config ──
@@ -72,8 +72,11 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
     const [techDuration, setTechDuration] = useState<number>(techCfg?.duration_minutes ?? 20);
     const [questionSource, setQuestionSource] = useState<string>(techCfg?.question_source || 'ai_generated');
 
-    // ── Coding config ──
+    // ── Problem Solving config ──
     const initCoding = initialData?.coding_config || {};
+    const [problemSolvingType, setProblemSolvingType] = useState<string>(
+        initCoding?.problem_solving_type || 'coding'
+    );
     const [codingCount, setCodingCount] = useState<number>(initCoding?.count ?? 0);
     const [codingDifficulties, setCodingDifficulties] = useState<string[]>(initCoding?.difficulty ?? []);
     const [codingDuration, setCodingDuration] = useState<number>(initCoding?.duration_minutes ?? 40);
@@ -94,21 +97,45 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
         setError('');
 
         // ── Validation ──────────────────────────────────────────────────────────
-        if (easyCount < 0 || mediumCount < 0 || hardCount < 0) {
-            setError('Technical question counts cannot be negative.');
+        if (easyCount < 0 || mediumCount < 0 || hardCount < 0 || codingCount < 0 || convRounds < 0) {
+            setError('Question counts cannot be negative.');
             return;
         }
-        if (codingCount < 0) {
-            setError('Coding problem count cannot be negative.');
+
+        const totalTech = Number(easyCount) + Number(mediumCount) + Number(hardCount);
+        if (totalTech > 10) {
+            setError('⚠️ Total technical questions cannot exceed 10. Values have been reset — please review and resubmit.');
+            // Proportionally scale down to 10
+            const scale = 10 / totalTech;
+            setEasyCount(Math.floor(easyCount * scale));
+            setMediumCount(Math.floor(mediumCount * scale));
+            setHardCount(10 - Math.floor(easyCount * scale) - Math.floor(mediumCount * scale));
             return;
         }
-        if (convRounds < 0) {
-            setError('Conversational rounds cannot be negative.');
+
+        if (codingCount > 10) {
+            setError(`⚠️ ${problemSolvingType === 'coding' ? 'Coding problems' : 'Analytical questions'} cannot exceed 10. Reset to 10 — please review and resubmit.`);
+            setCodingCount(10);
             return;
         }
-        // If coding section is partially configured, require both fields
-        if ((codingCount > 0 && codingDifficulties.length === 0)) {
-            setError('Select at least one difficulty level for the Coding section.');
+
+        if (convRounds > 10) {
+            setError('⚠️ Conversational rounds cannot exceed 10. Reset to 10 — please review and resubmit.');
+            setConvRounds(10);
+            return;
+        }
+
+        if (techDuration > 60 || codingDuration > 60 || convDuration > 60) {
+            setError('⚠️ Section duration cannot exceed 60 minutes. Values have been reset — please review and resubmit.');
+            if (techDuration > 60) setTechDuration(60);
+            if (codingDuration > 60) setCodingDuration(60);
+            if (convDuration > 60) setConvDuration(60);
+            return;
+        }
+
+        // If coding mode is selected and count > 0, at least one coding difficulty is required
+        if (problemSolvingType === 'coding' && codingCount > 0 && codingDifficulties.length === 0) {
+            setError('Select at least one difficulty level for Coding mode in Problem Solving section.');
             return;
         }
 
@@ -123,13 +150,22 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
             question_source: questionSource,
         };
 
-        // ── coding_config: null if nothing configured, difficulties lowercased ──
-        const coding_config = codingCount > 0 && codingDifficulties.length > 0
-            ? {
-                count: Number(codingCount),
-                difficulty: codingDifficulties.map(d => d.toLowerCase()),
-                duration_minutes: Number(codingDuration),
-            }
+        // ── coding_config (Problem Solving config) ───────────────────────────────
+        const coding_config = codingCount > 0
+            ? (
+                problemSolvingType === 'coding'
+                    ? {
+                        problem_solving_type: 'coding',
+                        count: Number(codingCount),
+                        difficulty: codingDifficulties.map(d => d.toLowerCase()),
+                        duration_minutes: Number(codingDuration),
+                    }
+                    : {
+                        problem_solving_type: 'analytical',
+                        count: Number(codingCount),
+                        duration_minutes: Number(codingDuration),
+                    }
+            )
             : null;
 
         // ── conversational_config: null if no rounds ─────────────────────────────
@@ -258,8 +294,9 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                         <input
                                             type="number" min={0} value={val}
                                             onChange={e => setter(Number(e.target.value))}
-                                            className="w-full px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm"
+                                            className={`w-full px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm ${val > 10 ? 'border-red-500' : ''}`}
                                         />
+                                        {val > 10 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 10</p>}
                                     </div>
                                 ))}
                                 <div>
@@ -267,8 +304,9 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                     <input
                                         type="number" min={1} value={techDuration}
                                         onChange={e => setTechDuration(Number(e.target.value))}
-                                        className="w-full px-3 py-2 text-gray-900 bg-white rounded-lg border border-blue-200 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
+                                        className={`w-full px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm focus:ring-1 focus:ring-blue-500 outline-none ${techDuration > 60 ? 'border-red-500' : 'border-blue-200'}`}
                                     />
+                                    {techDuration > 60 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 60 min</p>}
                                 </div>
                             </div>
                             <p className="text-xs text-gray-400">
@@ -278,28 +316,59 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                     )}
                 </div>
 
-                {/* ── CODING SECTION ── */}
+                {/* ── PROBLEM SOLVING SECTION ── */}
                 <div className="rounded-xl border overflow-hidden">
                     <SectionHeader
-                        title="Coding Section"
-                        description="Algorithm and coding challenges"
+                        title="Problem Solving Section"
+                        description="Choose coding or analytical problem-solving"
                         color="bg-purple-500"
-                        isOpen={codingOpen}
-                        onToggle={() => setCodingOpen(o => !o)}
+                        isOpen={problemSolvingOpen}
+                        onToggle={() => setProblemSolvingOpen(o => !o)}
                     />
-                    {codingOpen && (
+                    {problemSolvingOpen && (
                         <div className="p-4 bg-gray-50 border-t space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
+                                    Problem Solving Type
+                                </label>
+                                <div className="flex bg-gray-200 p-1 rounded-lg w-fit">
+                                    <button
+                                        type="button"
+                                        onClick={() => setProblemSolvingType('coding')}
+                                        className={`px-3 py-1.5 text-[10px] font-bold rounded-md transition-all ${
+                                            problemSolvingType === 'coding'
+                                                ? 'bg-white shadow text-purple-700'
+                                                : 'text-gray-500 hover:text-gray-700'
+                                        }`}
+                                    >
+                                        CODING
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setProblemSolvingType('analytical')}
+                                        className={`px-3 py-1.5 text-[10px] font-bold rounded-md transition-all ${
+                                            problemSolvingType === 'analytical'
+                                                ? 'bg-white shadow text-purple-700'
+                                                : 'text-gray-500 hover:text-gray-700'
+                                        }`}
+                                    >
+                                        ANALYTICAL
+                                    </button>
+                                </div>
+                            </div>
+
                             <div className="flex gap-4">
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
-                                        Number of Problems
+                                        {problemSolvingType === 'coding' ? 'Number of Coding Problems' : 'Number of Analytical Questions'}
                                     </label>
                                     <input
                                         type="number" min={0} value={codingCount}
                                         onChange={e => setCodingCount(Number(e.target.value))}
                                         placeholder="0"
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm ${codingCount > 10 ? 'border-red-500' : ''}`}
                                     />
+                                    {codingCount > 10 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 10</p>}
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1 text-purple-600">
@@ -308,37 +377,37 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                     <input
                                         type="number" min={1} value={codingDuration}
                                         onChange={e => setCodingDuration(Number(e.target.value))}
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border border-purple-200 text-sm focus:ring-1 focus:ring-purple-500 outline-none"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm focus:ring-1 focus:ring-purple-500 outline-none ${codingDuration > 60 ? 'border-red-500' : 'border-purple-200'}`}
                                     />
+                                    {codingDuration > 60 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 60 min</p>}
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
-                                    Difficulty Filter
-                                </label>
-                                <div className="flex gap-2">
-                                    {difficultyOptions.map(d => {
-                                        const active = codingDifficulties.includes(d);
-                                        const colors: Record<string, string> = {
-                                            easy: active ? 'bg-green-50 border-green-400 text-green-700' : 'bg-white text-gray-500',
-                                            medium: active ? 'bg-amber-50 border-amber-400 text-amber-700' : 'bg-white text-gray-500',
-                                            hard: active ? 'bg-red-50 border-red-400 text-red-700' : 'bg-white text-gray-500',
-                                        };
-                                        return (
-                                            <button
-                                                key={d} type="button"
-                                                onClick={() => toggleCodingDiff(d)}
-                                                className={`px-4 py-2 text-xs font-bold rounded-lg border transition-all capitalize ${colors[d]}`}
-                                            >
-                                                {d}
-                                            </button>
-                                        );
-                                    })}
+                            {problemSolvingType === 'coding' ? (
+                                <div>
+                                    <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
+                                        Difficulty Filter
+                                    </label>
+                                    <div className="flex gap-2">
+                                        {difficultyOptions.map(d => {
+                                            const active = codingDifficulties.includes(d);
+                                            const colors: Record<string, string> = {
+                                                easy: active ? 'bg-green-50 border-green-400 text-green-700' : 'bg-white text-gray-500',
+                                                medium: active ? 'bg-amber-50 border-amber-400 text-amber-700' : 'bg-white text-gray-500',
+                                                hard: active ? 'bg-red-50 border-red-400 text-red-700' : 'bg-white text-gray-500',
+                                            };
+                                            return (
+                                                <button
+                                                    key={d} type="button"
+                                                    onClick={() => toggleCodingDiff(d)}
+                                                    className={`px-4 py-2 text-xs font-bold rounded-lg border transition-all capitalize ${colors[d]}`}
+                                                >
+                                                    {d}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
-                            </div>
-                            <p className="text-xs text-gray-400">
-                                Config: {JSON.stringify({ count: Number(codingCount), difficulty: codingDifficulties })}
-                            </p>
+                            ) : null}
                         </div>
                     )}
                 </div>
@@ -365,16 +434,18 @@ export default function TemplateForm({ initialData, onSubmit, onCancel }: Templa
                                         type="number" min={0} value={convRounds}
                                         onChange={e => setConvRounds(Number(e.target.value))}
                                         placeholder="0"
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm ${convRounds > 10 ? 'border-red-500' : ''}`}
                                     />
+                                    {convRounds > 10 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 10</p>}
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1 text-emerald-600">Duration (min)</label>
                                     <input
                                         type="number" min={1} value={convDuration}
                                         onChange={e => setConvDuration(Number(e.target.value))}
-                                        className="w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border border-emerald-200 text-sm focus:ring-1 focus:ring-emerald-500 outline-none"
+                                        className={`w-32 px-3 py-2 text-gray-900 bg-white rounded-lg border text-sm focus:ring-1 focus:ring-emerald-500 outline-none ${convDuration > 60 ? 'border-red-500' : 'border-emerald-200'}`}
                                     />
+                                    {convDuration > 60 && <p className="text-[10px] text-red-500 mt-1 font-bold">Max 60 min</p>}
                                 </div>
                             </div>
                             <p className="text-xs text-gray-400">

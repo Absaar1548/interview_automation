@@ -23,6 +23,7 @@ export default function InterviewShell() {
     const submitAnswer = useInterviewStore((s) => s.submitAnswer);
     const completeSection = useInterviewStore((s) => s.completeSection);
     const completeInterview = useInterviewStore((s) => s.completeInterview);
+    const goToSectionSelector = useInterviewStore((s) => s.goToSectionSelector);
     const interviewId = useInterviewStore((s) => s.interviewId);
     const submitCurrentCode = useCodingStore((s) => s.submitCurrentCode);
 
@@ -319,6 +320,13 @@ export default function InterviewShell() {
                 {/* Improved Top Bar */}
                 <div className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm">
                     <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => goToSectionSelector()}
+                            disabled={isSubmitting}
+                            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                            Home
+                        </button>
                         <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                         <span className="text-xs font-bold text-gray-500 uppercase tracking-widest bg-gray-50 px-3 py-1 rounded-full border border-gray-100">
                             Interview in Progress

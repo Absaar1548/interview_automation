@@ -17,6 +17,7 @@ import ScheduleInterviewModal from '@/components/admin/ScheduleInterviewModal';
 import CancelInterviewDialog from '@/components/admin/CancelInterviewDialog';
 import ResumePreviewModal from '@/components/admin/ResumePreviewModal';
 import InterviewReportModal from '@/components/admin/InterviewReportModal';
+import InterviewFeedbackModal from '@/components/admin/InterviewFeedbackModal';
 import CredentialsCard from '@/components/admin/CredentialsCard';
 import { Toast, useToast } from '@/components/ui/Toast';
 
@@ -134,6 +135,7 @@ export default function AdminDashboardPage() {
     const [cancelTarget, setCancelTarget] = useState<CandidateRow | null>(null);
     const [summaryTarget, setSummaryTarget] = useState<CandidateRow | null>(null);
     const [reportTarget, setReportTarget] = useState<{ interviewId: string; candidateName: string } | null>(null);
+    const [feedbackTarget, setFeedbackTarget] = useState<{ interviewId: string; candidateName: string } | null>(null);
     const [previewTarget, setPreviewTarget] = useState<CandidateRow | null>(null);
     const [cancelLoading, setCancelLoading] = useState(false);
 
@@ -667,6 +669,14 @@ export default function AdminDashboardPage() {
                                                         )}
                                                         {ivStatus === 'completed' && s?.interview_id && (
                                                             <button
+                                                                onClick={() => setFeedbackTarget({ interviewId: s.interview_id, candidateName: candidate.username })}
+                                                                className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-md text-xs font-semibold hover:bg-indigo-100 transition-colors"
+                                                            >
+                                                                Feedback
+                                                            </button>
+                                                        )}
+                                                        {ivStatus === 'completed' && s?.interview_id && (
+                                                            <button
                                                                 onClick={() => setReportTarget({ interviewId: s.interview_id, candidateName: candidate.username })}
                                                                 className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-md text-xs font-semibold hover:bg-purple-100 transition-colors"
                                                             >
@@ -774,6 +784,15 @@ export default function AdminDashboardPage() {
                     interviewId={reportTarget.interviewId}
                     candidateName={reportTarget.candidateName}
                     onClose={() => setReportTarget(null)}
+                    onAuthError={handleAuthError}
+                />
+            )}
+
+            {feedbackTarget && (
+                <InterviewFeedbackModal
+                    interviewId={feedbackTarget.interviewId}
+                    candidateName={feedbackTarget.candidateName}
+                    onClose={() => setFeedbackTarget(null)}
                     onAuthError={handleAuthError}
                 />
             )}

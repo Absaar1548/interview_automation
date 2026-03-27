@@ -21,7 +21,7 @@ class ResumeJDParser:
     """Service to parse resume PDFs and job descriptions."""
     
     @staticmethod
-    def parse_resume_pdf(resume_path: str) -> Dict[str, Any]:
+    async def parse_resume_pdf(resume_path: str) -> Dict[str, Any]:
         """
         Parse a resume PDF file and extract key information.
         
@@ -37,20 +37,18 @@ class ResumeJDParser:
             - education: Education details
         """
         try:
-            with open(resume_path, 'rb') as file:
-                pdf_reader = pypdf.PdfReader(file)
-                text_content = []
-                
-                for page in pdf_reader.pages:
-                    text_content.append(page.extract_text())
-                
-                full_text = "\n".join(text_content)
-                
-                # Extract structured information
-                parsed_data = ResumeJDParser._extract_resume_info(full_text)
-                parsed_data['text'] = full_text
-                
-                return parsed_data
+            import anyio
+            def _read_pdf() -> Dict[str, Any]:
+                with open(resume_path, 'rb') as file:
+                    pdf_reader = pypdf.PdfReader(file)
+                    text_content = []
+                    for page in pdf_reader.pages:
+                        text_content.append(page.extract_text())
+                    full_text = "\n".join(text_content)
+                    parsed_data = ResumeJDParser._extract_resume_info(full_text)
+                    parsed_data['text'] = full_text
+                    return parsed_data
+            return await anyio.to_thread.run_sync(_read_pdf)
         except Exception as e:
             logger.error(f"Error parsing resume PDF: {e}")
             return {
@@ -62,7 +60,7 @@ class ResumeJDParser:
             }
     
     @staticmethod
-    def parse_resume_from_bytes(resume_bytes: bytes) -> Dict[str, Any]:
+    async def parse_resume_from_bytes(resume_bytes: bytes) -> Dict[str, Any]:
         """
         Parse a resume PDF from bytes.
         
@@ -73,19 +71,17 @@ class ResumeJDParser:
             Dictionary containing parsed resume data
         """
         try:
-            pdf_reader = pypdf.PdfReader(io.BytesIO(resume_bytes))
-            text_content = []
-            
-            for page in pdf_reader.pages:
-                text_content.append(page.extract_text())
-            
-            full_text = "\n".join(text_content)
-            
-            # Extract structured information
-            parsed_data = ResumeJDParser._extract_resume_info(full_text)
-            parsed_data['text'] = full_text
-            
-            return parsed_data
+            import anyio
+            def _read_bytes() -> Dict[str, Any]:
+                pdf_reader = pypdf.PdfReader(io.BytesIO(resume_bytes))
+                text_content = []
+                for page in pdf_reader.pages:
+                    text_content.append(page.extract_text())
+                full_text = "\n".join(text_content)
+                parsed_data = ResumeJDParser._extract_resume_info(full_text)
+                parsed_data['text'] = full_text
+                return parsed_data
+            return await anyio.to_thread.run_sync(_read_bytes)
         except Exception as e:
             logger.error(f"Error parsing resume from bytes: {e}")
             return {

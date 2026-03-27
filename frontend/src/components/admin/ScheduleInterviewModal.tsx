@@ -47,6 +47,8 @@ export default function ScheduleInterviewModal({
 
     const [previewQuestions, setPreviewQuestions] = useState<TemplatePreviewQuestion[]>([]);
     const [previewCodingProblems, setPreviewCodingProblems] = useState<{ problem_id: string; title: string; difficulty: string }[]>([]);
+    const [previewAnalyticalQuestions, setPreviewAnalyticalQuestions] = useState<TemplatePreviewQuestion[]>([]);
+    const [previewProblemSolvingType, setPreviewProblemSolvingType] = useState<'coding' | 'analytical'>('coding');
     const [previewConvRounds, setPreviewConvRounds] = useState<number>(0);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [draftInterviewId, setDraftInterviewId] = useState<string | null>(null);
@@ -59,6 +61,8 @@ export default function ScheduleInterviewModal({
         if (mode !== 'schedule' || !templateId) {
             setPreviewQuestions([]);
             setPreviewCodingProblems([]);
+            setPreviewAnalyticalQuestions([]);
+            setPreviewProblemSolvingType('coding');
             setPreviewConvRounds(0);
             return;
         }
@@ -70,8 +74,12 @@ export default function ScheduleInterviewModal({
                 // Technical questions
                 const rawQuestions = data.technical_section?.questions ?? [];
                 setPreviewQuestions(rawQuestions.map(q => ({ ...q, originalText: q.text })));
-                // Coding problems
+                // Problem-solving section (coding or analytical)
+                const psType = data.coding_section?.problem_solving_type || 'coding';
+                setPreviewProblemSolvingType(psType);
                 setPreviewCodingProblems(data.coding_section?.problems ?? []);
+                const analytical = data.coding_section?.questions ?? [];
+                setPreviewAnalyticalQuestions(analytical.map(q => ({ ...q, originalText: q.text })));
                 // Conversational rounds
                 setPreviewConvRounds(data.conversational_section?.rounds ?? 0);
             })
@@ -79,6 +87,8 @@ export default function ScheduleInterviewModal({
                 setError(`Failed to load template preview: ${err.detail || 'Unknown error'}`);
                 setPreviewQuestions([]);
                 setPreviewCodingProblems([]);
+                setPreviewAnalyticalQuestions([]);
+                setPreviewProblemSolvingType('coding');
                 setPreviewConvRounds(0);
                 setDraftInterviewId(null);
             })
@@ -149,6 +159,9 @@ export default function ScheduleInterviewModal({
             setPreviewQuestions(prev => prev.map(q =>
                 q.question_id === questionId ? { ...newQ, originalText: newQ.text } : q
             ));
+            setPreviewAnalyticalQuestions(prev => prev.map(q =>
+                q.question_id === questionId ? { ...newQ, originalText: newQ.text } : q
+            ));
             setShowRegenPrompt(null);
             setRegenComment('');
         } catch (err: any) {
@@ -184,9 +197,14 @@ export default function ScheduleInterviewModal({
                         custom_text: q.text !== q.originalText ? q.text : undefined,
                         order: idx + 1
                     })),
+                    ...previewAnalyticalQuestions.map((q, idx) => ({
+                        question_id: q.question_id,
+                        custom_text: q.text !== q.originalText ? q.text : undefined,
+                        order: previewQuestions.length + idx + 1
+                    })),
                     ...previewCodingProblems.map((p, idx) => ({
                         question_id: p.problem_id,
-                        order: previewQuestions.length + idx + 1
+                        order: previewQuestions.length + previewAnalyticalQuestions.length + idx + 1
                     }))
                 ];
                 const response = await scheduleInterview({
@@ -413,12 +431,12 @@ export default function ScheduleInterviewModal({
                                     )}
 
                                     {/* ── Coding Problems ── */}
-                                    {previewCodingProblems.length > 0 && (
+                                    {previewProblemSolvingType === 'coding' && previewCodingProblems.length > 0 && (
                                         <div>
                                             <div className="flex items-center gap-2 mb-2">
                                                 <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0" />
                                                 <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">
-                                                    Coding Problems ({previewCodingProblems.length})
+                                                    Problem Solving (Coding) ({previewCodingProblems.length})
                                                 </p>
                                             </div>
                                             <div className="overflow-hidden border border-purple-100 rounded-lg shadow-sm">
@@ -456,6 +474,93 @@ export default function ScheduleInterviewModal({
                                         </div>
                                     )}
 
+                                    {/* ── Analytical Questions ── */}
+                                    {previewProblemSolvingType === 'analytical' && previewAnalyticalQuestions.length > 0 && (
+                                        <div>
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0" />
+                                                <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">
+                                                    Problem Solving (Analytical) ({previewAnalyticalQuestions.length})
+                                                </p>
+                                            </div>
+                                            <div className="space-y-3 max-h-80 overflow-y-auto pr-2 custom-scrollbar">
+                                                {previewAnalyticalQuestions.map((q, idx) => (
+                                                    <div key={idx} className="group relative bg-white border hover:border-purple-200 rounded-lg p-3 transition-all duration-200 shadow-sm">
+                                                        <div className="flex justify-between items-center mb-1.5">
+                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                                                A{idx + 1} • {q.difficulty} • {q.category}
+                                                            </span>
+                                                            <div className="flex items-center gap-2">
+                                                                {editingIdx !== (1000 + idx) && (
+                                                                    <>
+                                                                        <button type="button" onClick={() => setShowRegenPrompt(q.question_id)}
+                                                                            disabled={regeneratingId === q.question_id}
+                                                                            className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 uppercase disabled:opacity-50">
+                                                                            {regeneratingId === q.question_id ? 'Regenerating...' : 'Regenerate'}
+                                                                        </button>
+                                                                        <button type="button" onClick={() => { setEditingIdx(1000 + idx); setTempEditText(q.text || (q as any).prompt); }}
+                                                                            className="text-[10px] font-bold text-blue-500 hover:text-blue-700 uppercase">
+                                                                            Edit
+                                                                        </button>
+                                                                    </>
+                                                                )}
+                                                                <button type="button"
+                                                                    onClick={() => setPreviewAnalyticalQuestions(prev => prev.filter((_, i) => i !== idx))}
+                                                                    className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                                                    title="Remove question">
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                                    </svg>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        {editingIdx === (1000 + idx) ? (
+                                                            <div className="space-y-2">
+                                                                <textarea autoFocus value={tempEditText}
+                                                                    onChange={(e) => setTempEditText(e.target.value)}
+                                                                    className="w-full text-sm text-gray-700 bg-white border border-blue-100 rounded p-2 focus:ring-1 focus:ring-blue-500 outline-none resize-none"
+                                                                    rows={3} />
+                                                                <div className="flex justify-end gap-2">
+                                                                    <button type="button" onClick={() => setEditingIdx(null)}
+                                                                        className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1">Cancel</button>
+                                                                    <button type="button"
+                                                                        onClick={async () => {
+                                                                            const updated = previewAnalyticalQuestions.map((item, i) => i === idx ? { ...item, text: tempEditText } : item);
+                                                                            setPreviewAnalyticalQuestions(updated);
+                                                                            setEditingIdx(null);
+                                                                        }}
+                                                                        className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600">Save</button>
+                                                                </div>
+                                                            </div>
+                                                        ) : showRegenPrompt === q.question_id ? (
+                                                            <div className="space-y-2 p-2 bg-emerald-50 rounded border border-emerald-100 animate-in fade-in slide-in-from-top-1">
+                                                                <p className="text-[10px] font-bold text-emerald-700 uppercase">Regeneration Instructions (Optional)</p>
+                                                                <textarea
+                                                                    value={regenComment}
+                                                                    onChange={(e) => setRegenComment(e.target.value)}
+                                                                    placeholder="e.g. Make it more business-case focused..."
+                                                                    className="w-full text-xs text-gray-700 bg-white border border-emerald-200 rounded p-2 focus:ring-1 focus:ring-emerald-500 outline-none resize-none"
+                                                                    rows={2}
+                                                                />
+                                                                <div className="flex justify-end gap-2">
+                                                                    <button type="button" onClick={() => setShowRegenPrompt(null)}
+                                                                        className="text-[10px] font-bold text-gray-400 hover:text-gray-600 uppercase">Cancel</button>
+                                                                    <button type="button"
+                                                                        onClick={() => handleRegenerate(q.question_id)}
+                                                                        className="text-[10px] font-bold bg-emerald-600 text-white px-2 py-1 rounded hover:bg-emerald-700 uppercase">
+                                                                        Regenerate Now
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-sm text-gray-700 font-medium leading-relaxed whitespace-pre-wrap">{q.text || (q as any).prompt}</p>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* ── Conversational Section ── */}
                                     {previewConvRounds > 0 && (
                                         <div>
@@ -476,7 +581,7 @@ export default function ScheduleInterviewModal({
                                     )}
 
                                     {/* Empty state — nothing in any section */}
-                                    {previewQuestions.length === 0 && previewCodingProblems.length === 0 && previewConvRounds === 0 && (
+                                    {previewQuestions.length === 0 && previewCodingProblems.length === 0 && previewAnalyticalQuestions.length === 0 && previewConvRounds === 0 && (
                                         <div className="text-center py-6 border-2 border-dashed border-gray-100 rounded-lg">
                                             <p className="text-xs text-gray-400">No preview available for this template.</p>
                                         </div>

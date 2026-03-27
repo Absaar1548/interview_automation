@@ -32,6 +32,7 @@ from app.schemas.interview_template import TemplatePreviewResponse
 
 logger = logging.getLogger(__name__)
 from app.services.interview_admin_sql_service import InterviewAdminSQLService
+from app.services.interview_session_sql_service import InterviewSessionSQLService
 from app.services.template_engine import template_engine
 from app.db.sql.enums import InterviewStatus
 from app.db.sql.unit_of_work import UnitOfWork
@@ -96,7 +97,11 @@ async def preview_template(
             return {
                 "interview_id": str(existing_draft.id),
                 "technical_section": {"questions": tech_questions},
-                "coding_section": curated.get("coding_section") or {"problems": (template.coding_config or {}).get("problems", [])},
+                "coding_section": curated.get("coding_section") or {
+                    "problem_solving_type": "coding",
+                    "problems": [],
+                    "questions": []
+                },
                 "conversational_section": curated.get("conversational_section") or {"rounds": (template.conversational_config or {}).get("rounds", 0)}
             }
         
@@ -142,7 +147,11 @@ async def preview_template(
         return {
             "interview_id": str(draft.id),
             "technical_section": {"questions": questions},
-            "coding_section": curated_questions.get("coding_section") or {"problems": []},
+            "coding_section": curated_questions.get("coding_section") or {
+                "problem_solving_type": "coding",
+                "problems": [],
+                "questions": []
+            },
             "conversational_section": curated_questions.get("conversational_section") or {"rounds": (template.conversational_config or {}).get("rounds", 0) if template else 0}
         }
         
@@ -241,6 +250,22 @@ async def get_interview_summary(
         "limit": limit,
         "offset": offset
     }
+
+
+@router.get(
+    "/{interview_id}/feedback",
+    summary="Get candidate feedback for a completed interview",
+)
+async def get_candidate_feedback(
+    interview_id: str,
+    current_admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_db_session),
+):
+    validated_iid = validate_uuid(interview_id)
+    return await InterviewSessionSQLService.get_candidate_feedback_by_interview(
+        session=session,
+        interview_id=validated_iid,
+    )
 
 
 @router.put(

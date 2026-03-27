@@ -33,6 +33,7 @@ interface InterviewStore {
 
     fetchSections?: () => Promise<void>;
     startSection: (sectionType: string) => Promise<void>;
+    goToSectionSelector: () => Promise<void>;
 }
 
 export const useInterviewStore = create<InterviewStore>((set, get) => ({
@@ -229,5 +230,16 @@ export const useInterviewStore = create<InterviewStore>((set, get) => ({
         } finally {
             set({ isSectionLoading: false });
         }
-    }
+    },
+
+    goToSectionSelector: async () => {
+        set({ error: null, isLoadingQuestion: false, currentQuestion: null, currentSection: null, state: "READY" });
+        try {
+            const sect = await interviewService.getSections();
+            set({ sections: sect });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Failed to load sections";
+            set({ error: errorMessage });
+        }
+    },
 }));

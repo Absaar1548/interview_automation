@@ -191,6 +191,17 @@ class InterviewAdminSQLService:
                         questions_list = coding_problems
                         break
             
+            # 3. Search analytical problem-solving questions if not found
+            if section_type is None:
+                analytical_questions = (curated.get('coding_section') or {}).get('questions', [])
+                for idx, q in enumerate(analytical_questions):
+                    if q.get('question_id') == question_id:
+                        section_type = 'coding'
+                        target_idx = idx
+                        target_q = q
+                        questions_list = analytical_questions
+                        break
+            
             if section_type is None:
                 raise HTTPException(status_code=404, detail="Question not found in interview")
 
@@ -241,23 +252,42 @@ class InterviewAdminSQLService:
                     interview.curated_questions['technical_section']['questions'] = questions_list
             
             elif section_type == 'coding':
-                # Coding problem regeneration (refetch from bank)
+                # Problem-solving regeneration (coding problem or analytical question)
                 template = await session.get(InterviewTemplate, interview.template_id)
                 config = template.coding_config or {}
-                difficulties = config.get("difficulty", ["medium"])
-                
-                exclude_ids = [p.get('problem_id') for p in questions_list]
-                new_q = await question_generator_service._get_single_replacement_coding_problem_from_bank(
-                    session=session,
-                    exclude_ids=exclude_ids,
-                    difficulties=difficulties
-                )
-                
-                if new_q:
-                    questions_list[target_idx] = new_q
-                    if 'coding_section' not in interview.curated_questions:
-                        interview.curated_questions['coding_section'] = {}
-                    interview.curated_questions['coding_section']['problems'] = questions_list
+                ps_type_raw = config.get("problem_solving_type") or config.get("problem_type") or "coding"
+                ps_type = str(ps_type_raw).lower()
+
+                if ps_type in ["analytical", "analytical_question", "analytical_questions", "non_coding", "non-coding"]:
+                    candidate = await uow.users.get_by_id(interview.candidate_id)
+                    profile = candidate.candidate_profile if candidate else None
+                    role_name = profile.role_name if profile and profile.role_name else None
+                    new_q = await question_generator_service._regenerate_analytical_question_with_llm(
+                        existing_question=target_q,
+                        all_questions=questions_list,
+                        comment=comment,
+                        role_name=role_name,
+                    )
+                    if new_q:
+                        new_q["answer_mode"] = "audio"
+                        new_q["evaluation_mode"] = "audio"
+                        questions_list[target_idx] = new_q
+                        if 'coding_section' not in interview.curated_questions:
+                            interview.curated_questions['coding_section'] = {}
+                        interview.curated_questions['coding_section']['questions'] = questions_list
+                else:
+                    difficulties = config.get("difficulty", ["medium"])
+                    exclude_ids = [p.get('problem_id') for p in questions_list]
+                    new_q = await question_generator_service._get_single_replacement_coding_problem_from_bank(
+                        session=session,
+                        exclude_ids=exclude_ids,
+                        difficulties=difficulties
+                    )
+                    if new_q:
+                        questions_list[target_idx] = new_q
+                        if 'coding_section' not in interview.curated_questions:
+                            interview.curated_questions['coding_section'] = {}
+                        interview.curated_questions['coding_section']['problems'] = questions_list
 
             if new_q:
                 from sqlalchemy.orm.attributes import flag_modified

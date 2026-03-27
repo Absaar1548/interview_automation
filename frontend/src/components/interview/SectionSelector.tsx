@@ -3,6 +3,7 @@
 import { useInterviewStore } from "@/store/interviewStore";
 import { useEffect, useState } from "react";
 import { interviewService } from "@/lib/interviewService";
+import { useAuthStore } from "@/store/authStore";
 
 export default function SectionSelector() {
     const sections = useInterviewStore(s => s.sections);
@@ -11,6 +12,26 @@ export default function SectionSelector() {
     const error = useInterviewStore(s => s.error);
 
     const [loadingSectionType, setLoadingSectionType] = useState<string | null>(null);
+    const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+    const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+    const authUser = useAuthStore((s) => s.user);
+    const [feedbackForm, setFeedbackForm] = useState({
+        name: authUser?.username || "",
+        email: authUser?.email || "",
+        overall_experience: "",
+        comfortable_with_tool: "",
+        ease_of_navigation: "",
+        clarity_of_instruction: "",
+        ui_feedback: "",
+        flow_of_interview: "",
+        interview_was_logical: "",
+        length_of_interview: "",
+        system_responsiveness: "",
+        questions_asked: "",
+        difficulty_level: "",
+        would_you_trust_app: "",
+        recommendation: "",
+    });
 
     // If sections wasn't fetched yet for some reason, fetch them.
     useEffect(() => {
@@ -164,16 +185,7 @@ export default function SectionSelector() {
                 <div className="mt-12 flex flex-col items-center border-t border-gray-100 pt-10">
                     <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-4">Final Submission</p>
                     <button
-                        onClick={async () => {
-                            try {
-                                await useInterviewStore.getState().completeInterview();
-                                // Successful completion will set state to COMPLETED, 
-                                // but we force redirect to thank-you as per requirement.
-                                window.location.href = '/thank-you';
-                            } catch (e) {
-                                console.error("Failed to complete interview:", e);
-                            }
-                        }}
+                        onClick={() => setShowFeedbackModal(true)}
                         className="group relative px-12 py-4 bg-red-600 text-white rounded-2xl font-bold uppercase tracking-wider shadow-xl shadow-red-200 transition-all duration-300 hover:bg-red-700 hover:scale-105 active:scale-95 flex items-center gap-3 overflow-hidden"
                     >
                         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
@@ -183,10 +195,82 @@ export default function SectionSelector() {
                         <span>Submit Interview</span>
                     </button>
                     <p className="mt-4 text-gray-400 text-[10px] font-medium max-w-xs text-center">
-                        Note: You can submit early even if some sections are incomplete.
+                        Feedback is mandatory before final interview submission.
                     </p>
                 </div>
             </div>
+
+            {showFeedbackModal && (
+                <div className="fixed inset-0 z-[120] bg-black/50 flex items-center justify-center p-4">
+                    <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto p-6">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-gray-900">Candidate Feedback</h3>
+                            <button
+                                onClick={() => setShowFeedbackModal(false)}
+                                className="text-gray-500 hover:text-gray-800"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {Object.keys(feedbackForm).map((key) => (
+                                <div key={key} className={key === "ui_feedback" || key === "recommendation" ? "md:col-span-2" : ""}>
+                                    <label className="block text-xs font-semibold text-gray-600 mb-1 capitalize">
+                                        {key.replace(/_/g, " ")}
+                                    </label>
+                                    {key === "ui_feedback" || key === "recommendation" ? (
+                                        <textarea
+                                            rows={3}
+                                            value={(feedbackForm as any)[key]}
+                                            onChange={(e) => setFeedbackForm(prev => ({ ...prev, [key]: e.target.value }))}
+                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800"
+                                        />
+                                    ) : (
+                                        <input
+                                            type="text"
+                                            value={(feedbackForm as any)[key]}
+                                            onChange={(e) => setFeedbackForm(prev => ({ ...prev, [key]: e.target.value }))}
+                                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800"
+                                        />
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="mt-5 flex justify-end gap-2">
+                            <button
+                                onClick={() => setShowFeedbackModal(false)}
+                                className="px-4 py-2 border rounded-lg text-sm"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                disabled={feedbackSubmitting}
+                                onClick={async () => {
+                                    const requiredMissing = Object.entries(feedbackForm).some(([, v]) => !String(v || "").trim());
+                                    if (requiredMissing) {
+                                        alert("Please fill all feedback fields.");
+                                        return;
+                                    }
+                                    setFeedbackSubmitting(true);
+                                    try {
+                                        await interviewService.submitCandidateFeedback(feedbackForm as any);
+                                        await useInterviewStore.getState().completeInterview();
+                                        window.location.href = '/thank-you';
+                                    } catch (e: any) {
+                                        alert(e?.message || "Failed to submit feedback/interview");
+                                    } finally {
+                                        setFeedbackSubmitting(false);
+                                    }
+                                }}
+                                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold disabled:opacity-60"
+                            >
+                                {feedbackSubmitting ? "Submitting..." : "Submit Feedback & Interview"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

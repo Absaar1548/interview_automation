@@ -56,7 +56,11 @@ async def create_template(
         settings=payload.settings,
         technical_config=payload.technical_config,
         coding_config=payload.coding_config,
-        conversational_config=payload.conversational_config
+        conversational_config=payload.conversational_config,
+        max_duration_minutes=payload.max_duration_minutes,
+        max_technical_questions=payload.max_technical_questions,
+        max_conversational_questions=payload.max_conversational_questions,
+        max_analytical_questions=payload.max_analytical_questions
     )
     
     db.add(new_template)

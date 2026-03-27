@@ -21,6 +21,7 @@ export default function InterviewPage() {
     const startInterview = useInterviewStore((s) => s.startInterview);
     const initialize = useInterviewStore((s) => s.initialize);
     const terminate = useInterviewStore((s) => s.terminate);
+    const goToSectionSelector = useInterviewStore((s) => s.goToSectionSelector);
     
     const { isAuthenticated, _hasHydrated } = useAuthStore();
     const [isRecovering, setIsRecovering] = useState(false);
@@ -118,6 +119,21 @@ export default function InterviewPage() {
             router.push("/summary");
         }
     }, [state, router]);
+
+    // ─── 6. Browser back should return to section selector, not dashboard ─────
+    useEffect(() => {
+        if (!interviewId || !candidateToken) return;
+        const marker = { interviewView: true };
+        window.history.pushState(marker, "", window.location.href);
+        const onPopState = (e: PopStateEvent) => {
+            const stateData = e.state as { interviewView?: boolean } | null;
+            if (stateData?.interviewView) return;
+            window.history.pushState(marker, "", window.location.href);
+            goToSectionSelector();
+        };
+        window.addEventListener("popstate", onPopState);
+        return () => window.removeEventListener("popstate", onPopState);
+    }, [interviewId, candidateToken, goToSectionSelector]);
 
     // ─── Render ───────────────────────────────────────────────────
 

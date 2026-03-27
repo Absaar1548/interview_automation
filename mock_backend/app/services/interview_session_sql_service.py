@@ -192,9 +192,12 @@ class InterviewSessionSQLService:
                             max_conv = conv_config.get("rounds", 10)
                     total_q = max_conv
 
+                display_type = s.section_type
+                if s.section_type == "coding":
+                    display_type = "problem_solving"
                 res.append({
                     "id": str(s.id),
-                    "section_type": s.section_type,
+                    "section_type": display_type,
                     "order_index": s.order_index,
                     "duration_minutes": s.duration_minutes,
                     "status": s.status,
@@ -654,10 +657,18 @@ class InterviewSessionSQLService:
                     answer_mode = "AUDIO"
 
             answer_mode = answer_mode.upper() if answer_mode else "TEXT"
+            section_response_type = "technical"
+            if session_obj.current_section_id and q.section_id == session_obj.current_section_id:
+                from app.db.sql.models.interview_session_section import InterviewSessionSection
+                current_section = await uow.session.get(InterviewSessionSection, session_obj.current_section_id)
+                if current_section and current_section.section_type == "coding" and q_type == "technical":
+                    # Problem-solving analytical mode should support spoken answers.
+                    answer_mode = "AUDIO"
+                    section_response_type = "analytical"
             prompt = q.custom_text or (q.question.text if q.question else "Please answer the following question.")
 
             return {
-                "type": "technical",
+                "type": section_response_type,
                 "question_id": str(q.id),
                 "question_text": prompt,
                 "answer_mode": answer_mode,
@@ -761,6 +772,12 @@ class InterviewSessionSQLService:
                 all_completed = all(s.status == "completed" for s in all_sections)
                 
                 if all_completed:
+                    if not interview.candidate_feedback:
+                        # Do not auto-complete until candidate submits mandatory feedback.
+                        return_state = "READY"
+                        await uow.flush()
+                        return {"state": return_state}
+
                     return_state = "COMPLETED"
                     
                     score_stmt = select(func.avg(InterviewResponse.ai_score)).where(
@@ -795,9 +812,25 @@ class InterviewSessionSQLService:
         candidate_id: uuid.UUID,
         answer_payload: dict,
     ) -> Dict[str, Any]:
+        # ── Phase 1: Collect all data inside a SHORT transaction (with row lock) ──
+        # We immediately exit the UoW after data collection so the DB lock is NOT
+        # held during the LLM round-trip (which can take 20-60 seconds).
+        question_data = None
+        resume_data = None
+        jd_data = None
+        q_type = None
+        current_question_id = None
+        answer_text = None
+        answer_audio_url = None
+        answer_mode = None
+        total_questions_in_section = 0
+        unanswered_count_before = 0
+        current_section_id_snap = None
+        template_id_snap = None
+
         async with UnitOfWork(session) as uow:
             from app.db.sql.models.interview_session_section import InterviewSessionSection
-            
+
             session_obj, interview = await InterviewSessionSQLService._get_session_and_interview(
                 uow, session_id, candidate_id, with_for_update=True
             )
@@ -805,7 +838,7 @@ class InterviewSessionSQLService:
             if not session_obj.current_section_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No active section."
+                    detail="No active section.",
                 )
 
             stmt = (
@@ -816,7 +849,7 @@ class InterviewSessionSQLService:
                 )
                 .where(
                     InterviewSessionQuestion.interview_session_id == session_obj.id,
-                    InterviewSessionQuestion.section_id == session_obj.current_section_id
+                    InterviewSessionQuestion.section_id == session_obj.current_section_id,
                 )
                 .order_by(InterviewSessionQuestion.order)
             )
@@ -834,63 +867,38 @@ class InterviewSessionSQLService:
             if not unanswered_questions:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="All questions in this section already answered"
+                    detail="All questions in this section already answered",
                 )
 
             current_question = unanswered_questions[0]
             q_type = getattr(current_question, "question_type", None) or "technical"
+            current_question_id = current_question.id
+            current_section_id_snap = session_obj.current_section_id
+            template_id_snap = interview.template_id
+            total_questions_in_section = len(questions)
+            unanswered_count_before = len(unanswered_questions)
 
             if q_type == "coding":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Coding questions must be submitted via the dedicated /coding/submit endpoint"
+                    detail="Coding questions must be submitted via the dedicated /coding/submit endpoint",
                 )
-            # ── CONVERSATIONAL ──
-            elif q_type == "conversational":
-                candidate = await uow.users.get_by_id(candidate_id)
-                resume_data = None
-                jd_data = None
-                if candidate and candidate.candidate_profile:
-                    profile = candidate.candidate_profile
-                    resume_data = profile.resume_json or {"text": profile.resume_text or "", "projects": [], "skills": profile.skills or []}
-                    jd_data = profile.jd_json or {"text": profile.job_description or "", "requirements": [], "required_skills": []}
 
+            # Extract answer payload fields
+            if q_type == "conversational":
                 answer_text = answer_payload.get("answer_payload", "") or ""
                 answer_audio_url = (
                     answer_payload.get("answer_payload")
                     if answer_payload.get("answer_type") == "AUDIO" else None
                 )
                 answer_mode = answer_payload.get("answer_type", "AUDIO").lower()
-
                 question_data = {
                     "prompt": current_question.custom_text or (current_question.question.text if current_question.question else ""),
                     "difficulty": current_question.question.difficulty.value.lower() if current_question.question else "medium",
                     "conversation_config": {"round": current_question.conversation_round},
                 }
-
-                evaluation = answer_evaluation_service.evaluate_answer(
-                    question=question_data,
-                    answer_text=answer_text,
-                    answer_audio_url=answer_audio_url,
-                    resume_data=resume_data,
-                    jd_data=jd_data,
-                )
-
-                response = InterviewResponse(
-                    session_id=session_id,
-                    question_id=current_question.id,
-                    answer_text=answer_text if not answer_audio_url else None,
-                    answer_audio_url=answer_audio_url,
-                    answer_mode=answer_mode,
-                    ai_score=evaluation.get("score"),
-                    ai_feedback=evaluation.get("feedback"),
-                    evaluation_json=evaluation,
-                )
-                session.add(response)
-                session_obj.answered_count += 1
-            # ── TECHNICAL ──
             else:
-                question_data = None
+                # technical / analytical
                 curated_questions = interview.curated_questions
                 if curated_questions and "questions" in curated_questions:
                     for q in curated_questions["questions"]:
@@ -903,30 +911,51 @@ class InterviewSessionSQLService:
                         "difficulty": current_question.question.difficulty.value.lower() if current_question.question else "medium",
                         "conversation_config": {},
                     }
-
-                candidate = await uow.users.get_by_id(candidate_id)
-                resume_data = None
-                jd_data = None
-                if candidate and candidate.candidate_profile:
-                    profile = candidate.candidate_profile
-                    resume_data = profile.resume_json or {"text": profile.resume_text or "", "projects": [], "skills": profile.skills or []}
-                    jd_data = profile.jd_json or {"text": profile.job_description or "", "requirements": [], "required_skills": []}
-
                 answer_text = answer_payload.get("answer_payload", "") if answer_payload.get("answer_type") in ["TEXT", "CODE"] else None
                 answer_audio_url = answer_payload.get("answer_payload") if answer_payload.get("answer_type") == "AUDIO" else None
                 answer_mode = answer_payload.get("answer_type", "TEXT").lower()
 
-                evaluation = answer_evaluation_service.evaluate_answer(
-                    question=question_data,
-                    answer_text=answer_text,
-                    answer_audio_url=answer_audio_url,
-                    resume_data=resume_data,
-                    jd_data=jd_data,
-                )
+            # Fetch resume/JD for LLM context
+            candidate = await uow.users.get_by_id(candidate_id)
+            if candidate and candidate.candidate_profile:
+                profile = candidate.candidate_profile
+                resume_data = profile.resume_json or {"text": profile.resume_text or "", "projects": [], "skills": profile.skills or []}
+                jd_data = profile.jd_json or {"text": profile.job_description or "", "requirements": [], "required_skills": []}
+        # ── Phase 1 END: UoW exits here, DB row-lock is RELEASED ──
 
+        # ── Phase 2: LLM Evaluation — no DB locks held ──
+        async with LLM_SEMAPHORE:
+            evaluation = await answer_evaluation_service.evaluate_answer(
+                question=question_data,
+                answer_text=answer_text,
+                answer_audio_url=answer_audio_url,
+                resume_data=resume_data,
+                jd_data=jd_data,
+            )
+
+        # ── Phase 3: Persist result in a fresh short transaction ──
+        async with UnitOfWork(session) as uow:
+            from app.db.sql.models.interview_session_section import InterviewSessionSection
+
+            session_obj, interview = await InterviewSessionSQLService._get_session_and_interview(
+                uow, session_id, candidate_id, with_for_update=True
+            )
+
+            if q_type == "conversational":
                 response = InterviewResponse(
                     session_id=session_id,
-                    question_id=current_question.id,
+                    question_id=current_question_id,
+                    answer_text=answer_text if not answer_audio_url else None,
+                    answer_audio_url=answer_audio_url,
+                    answer_mode=answer_mode,
+                    ai_score=evaluation.get("score"),
+                    ai_feedback=evaluation.get("feedback"),
+                    evaluation_json=evaluation,
+                )
+            else:
+                response = InterviewResponse(
+                    session_id=session_id,
+                    question_id=current_question_id,
                     answer_text=answer_text,
                     answer_audio_url=answer_audio_url,
                     answer_mode=answer_mode,
@@ -934,11 +963,11 @@ class InterviewSessionSQLService:
                     ai_feedback=evaluation.get("feedback"),
                     evaluation_json=evaluation,
                 )
-                session.add(response)
-                session_obj.answered_count += 1
-            
+            session.add(response)
+            session_obj.answered_count += 1
+
             # Check if this section is now complete
-            new_unanswered_count = len(unanswered_questions) - 1
+            new_unanswered_count = unanswered_count_before - 1
 
             # For conversational sections, check against template config rounds
             # not just DB question count (questions are generated on demand)
@@ -1075,6 +1104,12 @@ class InterviewSessionSQLService:
                 uow, session_id, candidate_id, with_for_update=True
             )
 
+            if not interview.candidate_feedback:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Candidate feedback is required before final interview submission."
+                )
+
             now = datetime.now(timezone.utc)
             
             # 1️⃣ Calculate average score
@@ -1105,6 +1140,34 @@ class InterviewSessionSQLService:
             )
 
             return {"state": "COMPLETED"}
+
+    @staticmethod
+    async def submit_candidate_feedback(
+        session: AsyncSession,
+        session_id: uuid.UUID,
+        candidate_id: uuid.UUID,
+        feedback_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        async with UnitOfWork(session) as uow:
+            _, interview = await InterviewSessionSQLService._get_session_and_interview(
+                uow, session_id, candidate_id, with_for_update=True
+            )
+            interview.candidate_feedback = feedback_payload
+            await uow.flush()
+            return {"saved": True}
+
+    @staticmethod
+    async def get_candidate_feedback_by_interview(
+        session: AsyncSession,
+        interview_id: uuid.UUID,
+    ) -> Dict[str, Any]:
+        async with UnitOfWork(session) as uow:
+            interview = await uow.interviews.get_by_id(interview_id)
+            if not interview:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Interview not found")
+            if not interview.candidate_feedback:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not submitted yet")
+            return interview.candidate_feedback
 
     @staticmethod
     async def get_summary(

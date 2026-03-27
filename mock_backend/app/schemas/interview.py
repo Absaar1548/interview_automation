@@ -1,5 +1,5 @@
 import uuid
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Any, Literal
 from datetime import datetime
 
@@ -83,7 +83,9 @@ class CodingProblemItem(BaseModel):
     starter_code: Optional[dict] = None
 
 class CodingSection(BaseModel):
-    problems: List[CodingProblemItem]
+    problem_solving_type: Optional[Literal["coding", "analytical"]] = "coding"
+    problems: Optional[List[CodingProblemItem]] = None
+    questions: Optional[List[CuratedQuestionItem]] = None
 
 class ConversationalSection(BaseModel):
     rounds: int
@@ -96,6 +98,7 @@ class CuratedQuestionsPayload(BaseModel):
     questions: Optional[List[CuratedQuestionItem]] = None
     technical_section: Optional[TechnicalSection] = None
     coding_section: Optional[CodingSection] = None
+    problem_solving_section: Optional[CodingSection] = None
     conversational_section: Optional[ConversationalSection] = None
 
 
@@ -110,6 +113,10 @@ class InterviewTemplateResponse(BaseModel):
     technical_config: Optional[dict] = None
     coding_config: Optional[dict] = None
     conversational_config: Optional[dict] = None
+    max_duration_minutes: int
+    max_technical_questions: int
+    max_conversational_questions: int
+    max_analytical_questions: int
     created_at: datetime
     updated_at: datetime
 
@@ -127,6 +134,43 @@ class InterviewTemplateCreate(BaseModel):
     technical_config: Optional[dict] = None
     coding_config: Optional[dict] = None
     conversational_config: Optional[dict] = None
+    max_duration_minutes: int = Field(default=60, ge=1, le=60, description="Max duration must be 1-60 minutes")
+    max_technical_questions: int = Field(default=10, ge=0, le=10, description="Max technical questions must be <= 10")
+    max_conversational_questions: int = Field(default=10, ge=0, le=10, description="Max conversational questions must be <= 10")
+    max_analytical_questions: int = Field(default=10, ge=0, le=10, description="Max analytical questions must be <= 10")
+
+    @model_validator(mode="after")
+    def check_config_question_counts(self) -> "InterviewTemplateCreate":
+        # technical_config stores flat counts: {easy, medium, hard}
+        if self.technical_config:
+            total = (
+                (self.technical_config.get("easy") or 0)
+                + (self.technical_config.get("medium") or 0)
+                + (self.technical_config.get("hard") or 0)
+            )
+            if total > self.max_technical_questions:
+                raise ValueError(
+                    f"Total technical questions ({total}) exceed the template limit of {self.max_technical_questions}."
+                )
+
+        # conversational_config stores {rounds: int}
+        if self.conversational_config:
+            rounds = self.conversational_config.get("rounds") or 0
+            if rounds > self.max_conversational_questions:
+                raise ValueError(
+                    f"Conversational rounds ({rounds}) exceed the template limit of {self.max_conversational_questions}."
+                )
+
+        # coding_config stores {count: int}
+        if self.coding_config:
+            count = self.coding_config.get("count") or 0
+            limit = self.max_analytical_questions  # same cap for both coding/analytical
+            if count > limit:
+                raise ValueError(
+                    f"Problem solving count ({count}) exceeds the template limit of {limit}."
+                )
+
+        return self
 
 
 class InterviewTemplateUpdate(BaseModel):
@@ -139,6 +183,43 @@ class InterviewTemplateUpdate(BaseModel):
     technical_config: Optional[dict] = None
     coding_config: Optional[dict] = None
     conversational_config: Optional[dict] = None
+    max_duration_minutes: Optional[int] = Field(None, ge=1, le=60, description="Max duration must be 1-60 minutes")
+    max_technical_questions: Optional[int] = Field(None, ge=0, le=10, description="Max technical questions must be <= 10")
+    max_conversational_questions: Optional[int] = Field(None, ge=0, le=10, description="Max conversational questions must be <= 10")
+    max_analytical_questions: Optional[int] = Field(None, ge=0, le=10, description="Max analytical questions must be <= 10")
+
+    @model_validator(mode="after")
+    def check_config_question_counts(self) -> "InterviewTemplateUpdate":
+        max_tech = self.max_technical_questions if self.max_technical_questions is not None else 10
+        max_conv = self.max_conversational_questions if self.max_conversational_questions is not None else 10
+        max_prob = self.max_analytical_questions if self.max_analytical_questions is not None else 10
+
+        if self.technical_config:
+            total = (
+                (self.technical_config.get("easy") or 0)
+                + (self.technical_config.get("medium") or 0)
+                + (self.technical_config.get("hard") or 0)
+            )
+            if total > max_tech:
+                raise ValueError(
+                    f"Total technical questions ({total}) exceed the template limit of {max_tech}."
+                )
+
+        if self.conversational_config:
+            rounds = self.conversational_config.get("rounds") or 0
+            if rounds > max_conv:
+                raise ValueError(
+                    f"Conversational rounds ({rounds}) exceed the template limit of {max_conv}."
+                )
+
+        if self.coding_config:
+            count = self.coding_config.get("count") or 0
+            if count > max_prob:
+                raise ValueError(
+                    f"Problem solving count ({count}) exceeds the template limit of {max_prob}."
+                )
+
+        return self
 
 
 class ScheduleInterviewResponse(BaseModel):
