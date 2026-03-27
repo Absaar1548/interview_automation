@@ -6,7 +6,7 @@ interface ConnectParams {
     onOpen: () => void;
     onPartialTranscript: (text: string) => void;
     onFinalTranscript: (text: string) => void;
-    onAnswerReady: (transcriptId: string) => void;
+    onAnswerReady: (transcriptId: string, communication_scores?: any) => void;
     onError: (error: Event) => void;
     onClose: () => void;
 }
@@ -68,7 +68,7 @@ class AnswerWebSocket {
 
         this.socket.on('ANSWER_READY', (data: any) => {
             console.log("[AnswerWebSocket] ANSWER READY:", data.transcript_id);
-            onAnswerReady(data.transcript_id || "");
+            onAnswerReady(data.transcript_id || "", data.communication_scores);
             this.disconnect();
         });
 

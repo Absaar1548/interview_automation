@@ -6,9 +6,11 @@ import { answerWebSocket } from "@/lib/answerWebSocket";
 interface AnswerPanelProps {
     mode: "AUDIO" | "CODE" | "TEXT";
     value: string;
-    onChange: (value: string) => void;
+    onChange: (value: string, scores?: any) => void;
     questionId: string;
     onVoiceStart?: () => void;
+    onAudioComplete?: (blob: Blob) => void;
+    onRecordingStateChange?: (isRecording: boolean) => void;
 }
 
 export default function AnswerPanel({
@@ -17,8 +19,16 @@ export default function AnswerPanel({
     onChange,
     questionId,
     onVoiceStart,
+    onAudioComplete,
+    onRecordingStateChange,
 }: AnswerPanelProps) {
-    const [isRecording, setIsRecording] = useState(false);
+    const [isRecording, setIsRecordingState] = useState(false);
+
+    const setIsRecording = useCallback((state: boolean) => {
+        setIsRecordingState(state);
+        onRecordingStateChange?.(state);
+    }, [onRecordingStateChange]);
+
     const [transcript, setTranscript] = useState("");
     const [finalTranscript, setFinalTranscript] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -26,6 +36,8 @@ export default function AnswerPanel({
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
     const isCleaningUpRef = useRef(false);
     const finalSentencesRef = useRef<string[]>([]);
 
@@ -38,6 +50,13 @@ export default function AnswerPanel({
             scriptProcessorRef.current.disconnect();
             scriptProcessorRef.current = null;
         }
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            try {
+                mediaRecorderRef.current.stop();
+            } catch (e) {}
+        }
+        mediaRecorderRef.current = null;
+
         if (audioContextRef.current) {
             audioContextRef.current.close().catch(console.error);
             audioContextRef.current = null;
@@ -138,12 +157,21 @@ export default function AnswerPanel({
                     onChange(fullText);
                     setFinalTranscript(fullText);
                 },
-                onAnswerReady: (transcriptId) => {
+                onAnswerReady: (transcriptId, scores) => {
+                    // Stop our parallel media recorder
+                    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+                        try {
+                            mediaRecorderRef.current.stop();
+                        } catch (e) {
+                            console.error("Error stopping MediaRecorder:", e);
+                        }
+                    }
+
                     // transcriptId acts as the final transcript content from the backend's compilation for the current recording session.
                     // However, we want to preserve all paragraphs accumulated.
                     // onFinalTranscript already processed this chunk right before this event.
                     const fullText = finalSentencesRef.current.join(" ");
-                    onChange(fullText || transcriptId);
+                    onChange(fullText || transcriptId, scores);
                     setFinalTranscript(fullText || transcriptId);
                     setIsRecording(false);
                 },
@@ -212,8 +240,29 @@ export default function AnswerPanel({
             // Store stream reference
             mediaStreamRef.current = stream;
 
-            // Step 3: Create MediaRecorder
-            // Verify stream is still valid before creating recorder
+            // Also start a standard MediaRecorder to capture a file for Voice Verification
+            try {
+                audioChunksRef.current = [];
+                // Use a fallback mimeType selection
+                const mimeType = ['audio/webm', 'audio/ogg', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type)) || '';
+                const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+                recorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) audioChunksRef.current.push(e.data);
+                };
+                recorder.onstop = () => {
+                    if (audioChunksRef.current.length > 0 && onAudioComplete) {
+                        const blob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' });
+                        onAudioComplete(blob);
+                    }
+                };
+                recorder.start(1000); // record in chunks to avoid memory spike
+                mediaRecorderRef.current = recorder;
+            } catch (err) {
+                console.error("[AnswerPanel] MediaRecorder init failed:", err);
+            }
+
+            // Step 3: Create MediaRecorder (Wait, legacy comment)
+            // Verify stream is still valid before creating audio context
             if (!mediaStreamRef.current || mediaStreamRef.current.getAudioTracks().length === 0) {
                 throw new Error("Media stream is no longer valid");
             }
@@ -225,19 +274,16 @@ export default function AnswerPanel({
 
             // Step 3: Initialize AudioContext and ScriptProcessor for PCM
             const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            const context = new AudioContextClass();
+            // Native, high-quality browser resampling to exactly 16kHz using built-in anti-aliasing filters
+            const context = new AudioContextClass({ sampleRate: 16000 });
             audioContextRef.current = context;
 
             const source = context.createMediaStreamSource(stream);
 
             // ScriptProcessor for simple PCM extraction (2048 buffer size)
-            // 2048 gives us chunks roughly every 42ms at 48kHz
+            // 2048 gives us chunks roughly every 128ms at 16000Hz
             const processor = context.createScriptProcessor(2048, 1, 1);
             scriptProcessorRef.current = processor;
-
-            // Target Azure sample rate
-            const targetSampleRate = 16000;
-            const sourceSampleRate = context.sampleRate;
 
             processor.onaudioprocess = (e) => {
                 // If we aren't supposed to be running, abort
@@ -246,19 +292,11 @@ export default function AnswerPanel({
 
                 const inputData = e.inputBuffer.getChannelData(0);
 
-                // Downsample Float32Array
-                const ratio = sourceSampleRate / targetSampleRate;
-                const newLength = Math.round(inputData.length / ratio);
-                const resampledData = new Float32Array(newLength);
-                for (let i = 0; i < newLength; i++) {
-                    resampledData[i] = inputData[Math.round(i * ratio)];
-                }
-
-                // Convert Float32Array to Int16Array
-                let l = resampledData.length;
+                // Convert Float32Array to Int16Array (AudioContext already handles 16kHz resampling cleanly)
+                let l = inputData.length;
                 const pcmData = new Int16Array(l);
                 while (l--) {
-                    const s = Math.max(-1, Math.min(1, resampledData[l]));
+                    const s = Math.max(-1, Math.min(1, inputData[l]));
                     pcmData[l] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
 

@@ -28,6 +28,9 @@ export default function InterviewShell() {
     const submitCurrentCode = useCodingStore((s) => s.submitCurrentCode);
 
     const [answerPayload, setAnswerPayload] = useState("");
+    const [communicationScores, setCommunicationScores] = useState<any>(null);
+    const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+    const [isMicActive, setIsMicActive] = useState(false);
     const [proctoringAlerts, setProctoringAlerts] = useState(0);
     const [faceVerificationStatus, setFaceVerificationStatus] = useState<"verifying" | "verified" | "failed" | null>(null);
     const videoStreamRef = useRef<MediaStream | null>(null);
@@ -35,6 +38,9 @@ export default function InterviewShell() {
 
     useEffect(() => {
         setAnswerPayload("");
+        setCommunicationScores(null);
+        setAudioBlob(null);
+        setIsMicActive(false);
     }, [currentQuestion?.question_id]);
 
     // Set interview ID in API client for proctoring events
@@ -262,15 +268,51 @@ export default function InterviewShell() {
             return;
         }
         // If timer expired, submit whatever we have (even empty = "NA")
-        const payload = isExpired
+        const payloadText = isExpired
             ? (answerPayload?.trim() || "NA")
             : answerPayload?.trim();
-        if (!isExpired && !payload) return;
+        if (!isExpired && !payloadText) return;
         if (!currentQuestion) return;
+
+        // Async Voice Verification Fire-And-Forget (Don't block the UI!)
+        if (audioBlob) {
+            const verifyVoice = async () => {
+                const formData = new FormData();
+                formData.append("audio", audioBlob, "answer.webm");
+                try {
+                    const token = localStorage.getItem("auth-storage")
+                        ? JSON.parse(localStorage.getItem("auth-storage") || "{}")?.state?.token
+                        : null;
+                    const response = await fetch(`${API_BASE_URL}/api/v1/verification/verify-voice`, {
+                        method: 'POST',
+                        headers: token ? { "Authorization": `Bearer ${token}` } : {},
+                        body: formData,
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.verified === false) {
+                            setProctoringAlerts(prev => prev + 1);
+                            await apiClient.post("/api/v1/proctoring/event", {
+                                event_type: "VOICE_MISMATCH",
+                                details: data.message || "Voice mismatch detected",
+                            }, true).catch(console.error);
+                        }
+                    }
+                } catch (err) {
+                    console.error("[VoiceVerification] Network error:", err);
+                }
+            };
+            verifyVoice();
+        }
+
+        const finalPayload = communicationScores 
+            ? { answer_payload: payloadText, communication_scores: communicationScores }
+            : payloadText;
+
         submitAnswer({
             question_id: currentQuestion.question_id,
             answer_type: currentQuestion.answer_mode,
-            answer_payload: payload,
+            answer_payload: finalPayload,
         });
     };
 
@@ -375,9 +417,14 @@ export default function InterviewShell() {
                                             <AnswerPanel
                                                 mode={currentQuestion.answer_mode}
                                                 value={answerPayload}
-                                                onChange={setAnswerPayload}
+                                                onChange={(val, scores) => {
+                                                    setAnswerPayload(val);
+                                                    if (scores) setCommunicationScores(scores);
+                                                }}
                                                 questionId={currentQuestion.question_id}
                                                 onVoiceStart={() => {}}
+                                                onAudioComplete={(blob) => setAudioBlob(blob)}
+                                                onRecordingStateChange={setIsMicActive}
                                             />
                                         </div>
                                     </>
@@ -390,6 +437,7 @@ export default function InterviewShell() {
                             <button
                                 onClick={() => handleSubmit()}
                                 disabled={
+                                    isMicActive ||
                                     isSubmitting ||
                                     !answerPayload ||
                                     !answerPayload.trim()
@@ -399,7 +447,7 @@ export default function InterviewShell() {
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
                                 </svg>
-                                <span>{isSubmitting ? "Submitting..." : "Submit Answer"}</span>
+                                <span>{isMicActive ? "Stop Recording First" : (isSubmitting ? "Submitting..." : "Submit Answer")}</span>
                             </button>
                         </div>
                     </div>

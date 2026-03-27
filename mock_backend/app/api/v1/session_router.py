@@ -266,6 +266,7 @@ def _register_socketio_handlers():
             partial_text = session_data.get('partial_text', '')
             
             final_text = partial_text.strip() if partial_text else ""
+            communication_scores = {}
             
             if recognition_session:
                 try:
@@ -273,6 +274,12 @@ def _register_socketio_handlers():
                     session_final = recognition_session.get_final_transcript()
                     if session_final and session_final.strip():
                         final_text = session_final
+                    
+                    # Extract communication scores from pronunciation assessment
+                    if hasattr(recognition_session, 'get_communication_scores'):
+                        communication_scores = recognition_session.get_communication_scores()
+                        if communication_scores:
+                            logger.info(f"[answer_ws] Communication scores: {communication_scores}")
                 except Exception as e:
                     logger.error(f"[answer_ws] Error stopping recognition session: {e}")
             
@@ -284,7 +291,8 @@ def _register_socketio_handlers():
             }, room=sid, namespace='/answer/ws')
             
             await _sio.emit('ANSWER_READY', {
-                "transcript_id": final_text
+                "transcript_id": final_text,
+                "communication_scores": communication_scores
             }, room=sid, namespace='/answer/ws')
             
             # Cleanup

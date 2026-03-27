@@ -885,11 +885,21 @@ class InterviewSessionSQLService:
                 )
 
             # Extract answer payload fields
+            raw_payload = answer_payload.get("answer_payload", "") or ""
+            comm_scores = {}
+            raw_transcript = None
+            extracted_text = ""
+            if isinstance(raw_payload, dict):
+                extracted_text = raw_payload.get("answer_payload", "")
+                comm_scores = raw_payload.get("communication_scores", {})
+                raw_transcript = extracted_text
+            else:
+                extracted_text = str(raw_payload)
+
             if q_type == "conversational":
-                answer_text = answer_payload.get("answer_payload", "") or ""
+                answer_text = extracted_text
                 answer_audio_url = (
-                    answer_payload.get("answer_payload")
-                    if answer_payload.get("answer_type") == "AUDIO" else None
+                    extracted_text if answer_payload.get("answer_type") == "AUDIO" else None
                 )
                 answer_mode = answer_payload.get("answer_type", "AUDIO").lower()
                 question_data = {
@@ -911,8 +921,10 @@ class InterviewSessionSQLService:
                         "difficulty": current_question.question.difficulty.value.lower() if current_question.question else "medium",
                         "conversation_config": {},
                     }
-                answer_text = answer_payload.get("answer_payload", "") if answer_payload.get("answer_type") in ["TEXT", "CODE"] else None
-                answer_audio_url = answer_payload.get("answer_payload") if answer_payload.get("answer_type") == "AUDIO" else None
+                answer_text = extracted_text
+                answer_audio_url = (
+                    extracted_text if answer_payload.get("answer_type") == "AUDIO" else None
+                )
                 answer_mode = answer_payload.get("answer_type", "TEXT").lower()
 
             # Fetch resume/JD for LLM context
@@ -951,6 +963,13 @@ class InterviewSessionSQLService:
                     ai_score=evaluation.get("score"),
                     ai_feedback=evaluation.get("feedback"),
                     evaluation_json=evaluation,
+                    # Communication scoring (Azure Pronunciation Assessment)
+                    raw_transcript=raw_transcript,
+                    fluency_score=comm_scores.get("fluency_score"),
+                    prosody_score=comm_scores.get("prosody_score"),
+                    accuracy_score=comm_scores.get("accuracy_score"),
+                    completeness_score=comm_scores.get("completeness_score"),
+                    pronunciation_score=comm_scores.get("pronunciation_score"),
                 )
             else:
                 response = InterviewResponse(
@@ -962,6 +981,12 @@ class InterviewSessionSQLService:
                     ai_score=evaluation.get("score"),
                     ai_feedback=evaluation.get("feedback"),
                     evaluation_json=evaluation,
+                    raw_transcript=raw_transcript,
+                    fluency_score=comm_scores.get("fluency_score"),
+                    prosody_score=comm_scores.get("prosody_score"),
+                    accuracy_score=comm_scores.get("accuracy_score"),
+                    completeness_score=comm_scores.get("completeness_score"),
+                    pronunciation_score=comm_scores.get("pronunciation_score"),
                 )
             session.add(response)
             session_obj.answered_count += 1

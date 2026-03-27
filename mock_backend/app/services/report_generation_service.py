@@ -137,7 +137,14 @@ class ReportGenerationService:
                 "feedback": resp.ai_feedback if resp else "No response/evaluation available",
                 "strengths": resp.evaluation_json.get('strengths', []) if resp and resp.evaluation_json and isinstance(resp.evaluation_json, dict) else [],
                 "weaknesses": resp.evaluation_json.get('weaknesses', []) if resp and resp.evaluation_json and isinstance(resp.evaluation_json, dict) else [],
-                "submitted_at": resp.submitted_at.isoformat() if resp and resp.submitted_at else None
+                "submitted_at": resp.submitted_at.isoformat() if resp and resp.submitted_at else None,
+                "communication_scores": {
+                    "fluency_score": getattr(resp, "fluency_score", None) if resp else None,
+                    "prosody_score": getattr(resp, "prosody_score", None) if resp else None,
+                    "accuracy_score": getattr(resp, "accuracy_score", None) if resp else None,
+                    "completeness_score": getattr(resp, "completeness_score", None) if resp else None,
+                    "pronunciation_score": getattr(resp, "pronunciation_score", None) if resp else None,
+                } if resp and any(getattr(resp, f, None) is not None for f in ["fluency_score", "prosody_score", "pronunciation_score"]) else None
             })
         
         # Build report

@@ -211,6 +211,44 @@ export default function InterviewReportModal({
                                                         )}
                                                     </div>
                                                 )}
+
+                                                {q.communication_scores && (
+                                                    <div className="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                                        <h4 className="text-sm font-semibold text-gray-800 mb-3 border-b border-gray-200 pb-2">Speech & Communication Analysis</h4>
+                                                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                                                            {q.communication_scores.pronunciation_score !== null && (
+                                                                <div className="flex flex-col bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Pronunciation</span>
+                                                                    <span className={`text-lg font-bold ${getScoreColor(q.communication_scores.pronunciation_score)}`}>{q.communication_scores.pronunciation_score.toFixed(1)}</span>
+                                                                </div>
+                                                            )}
+                                                            {q.communication_scores.fluency_score !== null && (
+                                                                <div className="flex flex-col bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Fluency</span>
+                                                                    <span className={`text-lg font-bold ${getScoreColor(q.communication_scores.fluency_score)}`}>{q.communication_scores.fluency_score.toFixed(1)}</span>
+                                                                </div>
+                                                            )}
+                                                            {q.communication_scores.prosody_score !== null && (
+                                                                <div className="flex flex-col bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Prosody</span>
+                                                                    <span className={`text-lg font-bold ${getScoreColor(q.communication_scores.prosody_score)}`}>{q.communication_scores.prosody_score.toFixed(1)}</span>
+                                                                </div>
+                                                            )}
+                                                            {q.communication_scores.accuracy_score !== null && (
+                                                                <div className="flex flex-col bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Accuracy</span>
+                                                                    <span className={`text-lg font-bold ${getScoreColor(q.communication_scores.accuracy_score)}`}>{q.communication_scores.accuracy_score.toFixed(1)}</span>
+                                                                </div>
+                                                            )}
+                                                            {q.communication_scores.completeness_score !== null && (
+                                                                <div className="flex flex-col bg-white p-2 rounded border border-gray-100 shadow-sm">
+                                                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Completeness</span>
+                                                                    <span className={`text-lg font-bold ${getScoreColor(q.communication_scores.completeness_score)}`}>{q.communication_scores.completeness_score.toFixed(1)}</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     ))}

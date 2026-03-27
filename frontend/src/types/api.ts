@@ -52,7 +52,7 @@ export interface QuestionResponse {
 export interface EvaluationSubmitRequest {
     question_id: string;
     answer_type: AnswerMode;
-    answer_payload: string;
+    answer_payload: string | { answer_payload: string; communication_scores?: any };
 }
 
 export interface EvaluationSubmitResponse {

@@ -192,6 +192,13 @@ export interface InterviewReport {
         strengths: string[];
         weaknesses: string[];
         submitted_at: string | null;
+        communication_scores?: {
+            fluency_score: number | null;
+            prosody_score: number | null;
+            accuracy_score: number | null;
+            completeness_score: number | null;
+            pronunciation_score: number | null;
+        } | null;
     }>;
     proctoring_summary: {
         face_verification_alerts: number;

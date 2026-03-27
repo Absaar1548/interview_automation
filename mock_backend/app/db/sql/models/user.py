@@ -69,6 +69,7 @@ class CandidateProfile(Base):
     video_sample_url: Mapped[str] = mapped_column(String, nullable=True)  # URL to stored video sample
     voice_sample_url: Mapped[str] = mapped_column(String, nullable=True)  # URL to stored voice sample
     face_verification_id: Mapped[str] = mapped_column(String, nullable=True)  # Azure Face API person ID
-    voice_profile_id: Mapped[str] = mapped_column(String, nullable=True)  # Azure Speech profile ID
+    voice_profile_id: Mapped[str] = mapped_column(String, nullable=True)  # Azure Speech profile ID (legacy)
+    voice_embedding: Mapped[list] = mapped_column(JSON, nullable=True)  # Pyannote speaker embedding vector
 
     user: Mapped["User"] = relationship("User", back_populates="candidate_profile")

@@ -17,6 +17,7 @@ from app.db.sql.unit_of_work import UnitOfWork
 from app.db.sql.models.user import User, CandidateProfile
 from app.db.sql.enums import UserRole
 from app.services.azure_verification_service import azure_verification_service
+from app.services.pyannote_service import pyannote_service
 
 logger = logging.getLogger(__name__)
 
@@ -235,26 +236,24 @@ async def upload_voice_sample(
         # Always save the file path first (file is already saved)
         candidate_profile.voice_sample_url = file_path
         
-        # CRITICAL: Always mark as verified if file was saved, regardless of Azure result
-        # This ensures the "Start Interview" button appears even in detection-only mode
+        # CRITICAL: Always mark as verified if file was saved
         candidate_profile.voice_verified = True
         
-        if candidate_profile.voice_profile_id:
-            # Note: Azure Speech Service typically expects WAV format
-            # For WebM/OGG formats, conversion would be needed in production
-            # For now, we'll attempt enrollment (Azure may accept or reject based on format)
-            enrollment_success = await azure_verification_service.enroll_voice_sample(
-                candidate_profile.voice_profile_id,
-                audio_data,
-                content_type=audio.content_type or "audio/webm"
+        # ── Pyannote voice embedding extraction ──
+        # Extract a speaker embedding (voiceprint) from the saved audio file
+        # and store it on the candidate profile for later verification.
+        voiceprint = await pyannote_service.extract_voiceprint(file_path)
+        if voiceprint is not None:
+            candidate_profile.voice_embedding = voiceprint
+            logger.info(
+                f"Voice embedding extracted and stored for candidate {current_candidate.id} "
+                f"({len(voiceprint)} dims, pyannote)"
             )
-            mode = "detection-only" if is_detection_only_voice else "full verification"
-            if enrollment_success or is_detection_only_voice:
-                logger.info(f"Voice sample uploaded and verified for candidate {current_candidate.id} (mode: {mode})")
-            else:
-                logger.warning(f"Voice sample saved but Azure enrollment may have failed for candidate {current_candidate.id} (still marked as verified)")
         else:
-            logger.info(f"Voice sample uploaded for candidate {current_candidate.id} (Azure service not available)")
+            logger.warning(
+                f"Could not extract voice embedding for candidate {current_candidate.id}. "
+                f"Voice sample saved but embedding is null."
+            )
         
         await uow.flush()
         
@@ -262,7 +261,8 @@ async def upload_voice_sample(
             "success": True,
             "message": "Voice sample uploaded successfully",
             "voice_verified": candidate_profile.voice_verified,
-            "voice_sample_url": candidate_profile.voice_sample_url
+            "voice_sample_url": candidate_profile.voice_sample_url,
+            "voice_embedding_stored": voiceprint is not None
         }
 
 
@@ -372,18 +372,36 @@ async def verify_voice_during_interview(
         # Read audio data
         audio_data = await audio.read()
         
-        # Verify voice using Azure Speaker Recognition
+        # ── Pyannote voice verification ──
+        # Save audio temporarily for pyannote processing
+        import tempfile
+        temp_path = os.path.join(VERIFICATION_UPLOAD_DIR, f"{current_candidate.id}_verify_temp.webm")
+        with open(temp_path, "wb") as f:
+            f.write(audio_data)
+        
         try:
-            verified = await azure_verification_service.verify_voice_from_url(
-                audio_data=audio_data,
-                reference_voice_url=candidate_profile.voice_sample_url
-            )
-            
-            return {
-                "verified": verified,
-                "confidence": 0.88 if verified else 0.25,  # Mock confidence score
-                "message": "Voice verified successfully" if verified else "Voice mismatch detected"
-            }
+            enrolled_embedding = candidate_profile.voice_embedding
+            if enrolled_embedding:
+                verified, similarity = await pyannote_service.verify_voiceprint(
+                    audio_file_path=temp_path,
+                    enrolled_embedding=enrolled_embedding,
+                )
+                return {
+                    "verified": verified,
+                    "confidence": similarity,
+                    "message": "Voice verified successfully" if verified else "Voice mismatch detected"
+                }
+            else:
+                # No embedding stored — fall back to file-existence check
+                logger.warning(
+                    f"No voice embedding stored for candidate {current_candidate.id}. "
+                    f"Skipping pyannote verification."
+                )
+                return {
+                    "verified": True,
+                    "confidence": 0.0,
+                    "message": "No enrolled voiceprint available — skipping verification"
+                }
         except Exception as e:
             logger.error(f"Voice verification error: {e}")
             return {
@@ -391,3 +409,9 @@ async def verify_voice_during_interview(
                 "confidence": 0.0,
                 "message": f"Verification error: {str(e)}"
             }
+        finally:
+            # Clean up temp file
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass

@@ -12,13 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class AzureVerificationService:
-    """Service for Azure Face and Speech verification."""
+    """Service for Azure Face verification."""
     
     def __init__(self):
         self.face_api_endpoint = os.getenv("AZURE_FACE_API_ENDPOINT")
         self.face_api_key = os.getenv("AZURE_FACE_API_KEY")
-        self.speech_api_key = os.getenv("AZURE_SPEECH_API_KEY")
-        self.speech_region = os.getenv("AZURE_SPEECH_REGION")
         
         # Person group ID for face verification
         self.person_group_id = os.getenv("AZURE_FACE_PERSON_GROUP_ID", "interview_candidates")
@@ -26,13 +24,12 @@ class AzureVerificationService:
         # Feature availability flags
         self._face_detection_available = False
         self._face_verification_available = False  # PersonGroup features
-        self._voice_verification_available = False
         
-        self._initialized = bool(self.face_api_endpoint and self.face_api_key and self.speech_api_key)
+        self._initialized = bool(self.face_api_endpoint and self.face_api_key)
         self._client = None
         
         if not self._initialized:
-            logger.warning("Azure verification credentials not configured. Verification will use mock mode.")
+            logger.warning("Azure Face credentials not configured. Face verification will use mock mode.")
     
     async def get_client(self) -> httpx.AsyncClient:
         """Get or create the async HTTP client."""

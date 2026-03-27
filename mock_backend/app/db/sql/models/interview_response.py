@@ -22,6 +22,17 @@ class InterviewResponse(Base):
     ai_feedback: Mapped[str] = mapped_column(Text, nullable=True)
     evaluation_json: Mapped[dict] = mapped_column(JSON, nullable=True)  # Full evaluation details
     
+    # Communication scoring (Azure Pronunciation Assessment)
+    raw_transcript: Mapped[str] = mapped_column(Text, nullable=True)  # Unedited STT output with disfluencies
+    fluency_score: Mapped[float] = mapped_column(Float, nullable=True)
+    prosody_score: Mapped[float] = mapped_column(Float, nullable=True)
+    accuracy_score: Mapped[float] = mapped_column(Float, nullable=True)
+    completeness_score: Mapped[float] = mapped_column(Float, nullable=True)
+    pronunciation_score: Mapped[float] = mapped_column(Float, nullable=True)  # Composite
+    
+    # Voice verification (pyannote cosine similarity)
+    voice_verification_score: Mapped[float] = mapped_column(Float, nullable=True)
+    
     submitted_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     
     # Relationships

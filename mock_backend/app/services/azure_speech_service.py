@@ -28,6 +28,7 @@ class AzureSpeechService:
     def __init__(self):
         self.speech_key = os.getenv("AZURE_SPEECH_KEY") or os.getenv("AZURE_SPEECH_SUBSCRIPTION_KEY") or os.getenv("AZURE_SPEECH_API_KEY")
         self.speech_region = os.getenv("AZURE_SPEECH_REGION", "eastus")
+        self.speech_endpoint = os.getenv("AZURE_SPEECH_ENDPOINT")
         self._initialized = bool(self.speech_key and SPEECH_SDK_AVAILABLE)
         self._active_sessions: Dict[str, 'RecognitionSession'] = {}
         
@@ -65,6 +66,7 @@ class AzureSpeechService:
                 session_id=session_id,
                 speech_key=self.speech_key,
                 speech_region=self.speech_region,
+                speech_endpoint=self.speech_endpoint,
                 on_partial_result=on_partial_result,
                 on_final_result=on_final_result
             )
@@ -120,6 +122,7 @@ class RecognitionSession:
         speech_region: str,
         on_partial_result: Callable[[str], None],
         on_final_result: Callable[[str], None],
+        speech_endpoint: Optional[str] = None,
     ):
         self.session_id = session_id
         self.on_partial_result = on_partial_result
@@ -129,12 +132,24 @@ class RecognitionSession:
         self.final_transcript_parts = []
         self.is_running = False
         
+        # Communication scoring accumulators
+        self._pronunciation_results = []  # list of dicts per recognized segment
+        
         try:
             # Configure Azure Speech SDK
-            speech_config = speechsdk.SpeechConfig(
-                subscription=speech_key,
-                region=speech_region
-            )
+            if speech_endpoint:
+                speech_config = speechsdk.SpeechConfig(
+                    subscription=speech_key,
+                    endpoint=speech_endpoint
+                )
+                logger.debug(f"[RecognitionSession] Using custom Azure endpoint: {speech_endpoint}")
+            else:
+                speech_config = speechsdk.SpeechConfig(
+                    subscription=speech_key,
+                    region=speech_region
+                )
+                logger.debug(f"[RecognitionSession] Using standard Azure region: {speech_region}")
+                
             speech_config.speech_recognition_language = "en-US"
             speech_config.request_word_level_timestamps()
             
@@ -154,6 +169,22 @@ class RecognitionSession:
                 speech_config=speech_config,
                 audio_config=audio_config
             )
+            
+            # ── Pronunciation Assessment ──────────────────────────────────
+            # Attach pronunciation assessment config for communication scoring.
+            # Uses "speaking" (unscripted) mode since interview answers have no
+            # reference text.  Prosody assessment is enabled for rhythm/intonation.
+            try:
+                pronunciation_config = speechsdk.PronunciationAssessmentConfig(
+                    grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
+                    granularity=speechsdk.PronunciationAssessmentGranularity.FullText,
+                    enable_miscue=False,
+                )
+                pronunciation_config.enable_prosody_assessment()
+                pronunciation_config.apply_to(self.recognizer)
+                logger.debug(f"[RecognitionSession] Pronunciation Assessment enabled")
+            except Exception as e:
+                logger.warning(f"[RecognitionSession] Could not enable Pronunciation Assessment: {e}")
             
             # Set up event handlers
             self.recognizer.recognizing.connect(self._on_recognizing)
@@ -186,14 +217,30 @@ class RecognitionSession:
                     logger.error(f"[STT ERROR] Partial callback error: {e}")
     
     def _on_recognized(self, evt: speechsdk.SpeechRecognitionEventArgs):
-        """Handle final recognition results."""
+        """Handle final recognition results and extract pronunciation scores."""
         if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
             text = evt.result.text
             if text:
                 self.final_transcript_parts.append(text)
-                # Log final result
                 logger.debug(f"[Azure STT] Final: {text}")
-                # Call the callback (it's synchronous, will handle async internally)
+                
+                # Extract pronunciation assessment scores from this segment
+                try:
+                    pron_result = speechsdk.PronunciationAssessmentResult(evt.result)
+                    segment_scores = {
+                        "accuracy_score": pron_result.accuracy_score,
+                        "fluency_score": pron_result.fluency_score,
+                        "completeness_score": pron_result.completeness_score,
+                        "pronunciation_score": pron_result.pronunciation_score,
+                    }
+                    # Prosody score may not be available in all SDK versions
+                    if hasattr(pron_result, "prosody_score"):
+                        segment_scores["prosody_score"] = pron_result.prosody_score
+                    self._pronunciation_results.append(segment_scores)
+                    logger.debug(f"[Azure STT] Pronunciation scores: {segment_scores}")
+                except Exception as e:
+                    logger.debug(f"[Azure STT] Could not extract pronunciation scores: {e}")
+                
                 try:
                     self.on_final_result(text)
                 except Exception as e:
@@ -254,6 +301,26 @@ class RecognitionSession:
     def get_final_transcript(self) -> str:
         """Get the complete final transcript."""
         return " ".join(self.final_transcript_parts)
+
+    def get_communication_scores(self) -> dict:
+        """
+        Return averaged communication scores across all recognized segments.
+        
+        Returns dict with keys: accuracy_score, fluency_score, completeness_score,
+        pronunciation_score, prosody_score (if available).  All values 0-100.
+        Returns empty dict if no pronunciation data was collected.
+        """
+        if not self._pronunciation_results:
+            return {}
+        
+        keys = ["accuracy_score", "fluency_score", "completeness_score",
+                "pronunciation_score", "prosody_score"]
+        averaged = {}
+        for key in keys:
+            values = [s[key] for s in self._pronunciation_results if key in s and s[key] is not None]
+            if values:
+                averaged[key] = round(sum(values) / len(values), 2)
+        return averaged
 
 
 class MockRecognitionSession:
